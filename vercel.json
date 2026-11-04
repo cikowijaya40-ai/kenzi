@@ -1,0 +1,8 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "regions": ["sin1"],
+  "functions": { "src/app/api/**/*": { "maxDuration": 30 } },
+  "crons": [{ "path": "/api/cron/maintenance", "schedule": "0 3 * * *" }]
+}
