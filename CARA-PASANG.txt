@@ -1,0 +1,35 @@
+KENZI — PATCH (GitHub Sync fix + optimasi usage), TANPA fitur Maintenance
+==========================================================================
+PATCH: timpa file di zip ini ke project kenzi-main (struktur folder sama). Lalu: npm install (package.json berubah), git push / redeploy.
+Perbaikan GitHub Sync tetap ada.
+
+CARA PASANG
+1) Timpa project lama dengan isi zip ini, lalu git push / redeploy.
+2) (Opsional, disarankan) Supabase -> SQL Editor -> jalankan:
+     supabase/migrations/2026-11-usage-optimization.sql
+   Isinya: index pesanan PENDING + pembersihan harian tagihan yang tak pernah dibayar (>45 hari).
+   Pesanan LUNAS, saldo, dan mutasi tidak pernah dihapus.
+3) Tidak ada env baru yang wajib.
+
+YANG DIOPTIMALKAN
+Vercel
+- Halaman /produk/[slug] sekarang di-cache CDN (sebelumnya 1 invocation per kunjungan).
+- Sync GitHub: commit diberi [skip ci] + vercel.json ignoreCommand -> commit backup data tidak memicu build.
+  Auto-sync admin digabung (banyak edit = 1 commit, tunda 20 dtk) dan dilewati total bila env GitHub kosong.
+- Status GitHub ikut di /api/setup (tanpa request tambahan saat buka admin).
+- Polling order/top up: berhenti saat tab tersembunyi dan setelah tagihan kedaluwarsa (+2 mnt); maks 20 dtk.
+- Katalog: browser cache 30 dtk + localStorage segar (<45 dtk) tidak request ulang.
+- Gambar produk diperkecil (916KB -> 392KB) -> hemat Fast Data Transfer.
+- Dependency tak terpakai dibuang (pg, qrcode, clsx, tailwind-merge, canvas-confetti) -> install/build lebih cepat.
+- sitemap.xml di-revalidate 1x/hari (tidak beku di waktu build).
+Supabase
+- getOrder / deleteOrder: 1 query (sebelumnya sampai 2).
+- "Cek Semua Pending" hanya mengambil pesanan PENDING (sebelumnya 100 pesanan penuh).
+- Cache produk publik & admin tidak lagi saling menghapus.
+- Upload gambar: Cache-Control 1 tahun (hemat egress), tanpa listBuckets tiap upload.
+- Fallback base64 dibatasi 150KB (sebelumnya file asli utuh masuk database & dikirim ke semua pengunjung).
+- run_maintenance harian: bersihkan data tak berguna (lihat SQL).
+
+CATATAN
+- next 14.2.15 punya peringatan keamanan dari npm. Disarankan naik ke versi 14.2.x terbaru
+  (npm i next@14 lalu tes) — tidak saya ubah di sini agar tidak mengubah perilaku.

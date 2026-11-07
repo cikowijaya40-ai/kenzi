@@ -97,10 +97,16 @@ export function useCatalog() {
     const [loading, setLoading] = useState(true);
     useEffect(() => {
         let alive = true;
+        let fresh = false;
         try {
             const raw = localStorage.getItem(CAT_KEY);
-            if (raw) { const c = JSON.parse(raw); if (c?.d) { setData(c.d); setLoading(false); } }
+            if (raw) {
+                const c = JSON.parse(raw);
+                if (c?.d) { setData(c.d); setLoading(false); fresh = Date.now() - (c.t || 0) < 45_000; }
+            }
         } catch { }
+        // Data di perangkat masih segar → tidak perlu request sama sekali (hemat Edge Request & invocation)
+        if (fresh) return () => { alive = false; };
         (async () => {
             const r: any = await fetchCatalog();
             if (!alive) return;

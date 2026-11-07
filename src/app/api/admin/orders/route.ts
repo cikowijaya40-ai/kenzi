@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAllOrders, updateOrder, deleteOrder, getOrder } from '@/lib/supabase';
+import { getAllOrders, getPendingOrders, updateOrder, deleteOrder, getOrder } from '@/lib/supabase';
 import { orderLicenseKey } from '@/lib/thanhub';
 import { verifyAdminAuth } from '@/lib/security';
 import { checkPaymentStatus } from '@/lib/wijayapay';
@@ -36,8 +36,7 @@ export async function POST(req: Request) {
         // AKSI: CEK SEMUA PEMBAYARAN PENDING (MASSAL)
         // ---------------------------------------------------------
         if (action === 'check_all_pending') {
-            const allOrders = await getAllOrders();
-            const pendingOrders = allOrders.filter(o => o.status === 'PENDING');
+            const pendingOrders = await getPendingOrders();
             let newlyPaid = 0;
             const details: any[] = [];
 

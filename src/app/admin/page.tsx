@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
     Settings,
@@ -166,6 +166,21 @@ export default function AdminDashboardPage() {
     // GitHub sync state
     const [ghSyncLoading, setGhSyncLoading] = useState(false);
     const [thBalance, setThBalance] = useState<number | null>(null);
+    // null = belum dicek, false = env GITHUB_TOKEN/OWNER/REPOS belum diisi di Vercel (sync opsional dilewati)
+    const [ghConfigured, setGhConfigured] = useState<boolean | null>(null);
+    const ghStatusNote = ghConfigured === false ? '— Dilewati (GitHub belum dikonfigurasi, opsional)' : '✓ Backup dikirim ke GitHub (digabung, ±20 dtk)';
+    const ghTimer = useRef<any>(null);
+
+    // Sync otomatis di belakang layar. Dilewati bila GitHub belum dikonfigurasi, dan DIGABUNG:
+    // banyak edit beruntun hanya jadi 1 commit/1 invocation (hemat invocation Vercel & mencegah build berulang).
+    const autoSyncGitHub = (message: string) => {
+        if (ghConfigured === false) return;
+        clearTimeout(ghTimer.current);
+        const headers = authHeaders();
+        ghTimer.current = setTimeout(() => {
+            fetch('/api/admin/github/sync', { method: 'POST', headers, body: JSON.stringify({ message }) }).catch(() => { });
+        }, 20_000);
+    };
 
     const showToast = (type: 'success' | 'error', text: string) => {
         setToastMessage({ type, text });
@@ -280,6 +295,7 @@ export default function AdminDashboardPage() {
             const dbRes = await fetch('/api/setup');
             const dbJson = await dbRes.json();
             setDbStatus(dbJson);
+            if (typeof dbJson.github_configured === 'boolean') setGhConfigured(dbJson.github_configured);
 
             // Saldo Thanhub (opsional)
             try {
@@ -320,8 +336,24 @@ export default function AdminDashboardPage() {
                     details: [
                         { label: 'Target Repo', value: 'Sesuai GITHUB_OWNER/GITHUB_REPOS' },
                         { label: 'Status Commit', value: '✓ Terkirim ke branch main' },
-                        { label: 'Estimasi Update', value: '~1 Menit ke Depan (Delay GitHub/Vercel)' },
+                        { label: 'Catatan', value: 'Backup saja — website tetap membaca Supabase (tidak perlu build ulang)' },
                         { label: 'Database Supabase', value: '✓ Live Seketika (0 Detik)' },
+                    ],
+                });
+            } else if (data.code === 'NOT_CONFIGURED') {
+                // Bukan error database / kode: env GitHub memang belum diisi di Vercel. Sync ini opsional.
+                setGhConfigured(false);
+                showToast('error', 'GitHub sync belum dikonfigurasi');
+                openFloatingModal({
+                    type: 'payment_not_detected', // tampilan amber (peringatan), bukan merah
+                    title: 'GitHub Sync Belum Dikonfigurasi',
+                    subtitle: 'Fitur ini opsional dan TIDAK memengaruhi toko. Produk & pengaturan tetap tersimpan di Supabase. Isi 3 environment variable di bawah pada Vercel (Project → Settings → Environment Variables), lalu Redeploy, kalau kamu ingin backup katalog otomatis ke GitHub.',
+                    actionType: 'Sync ke GitHub',
+                    details: [
+                        { label: 'GITHUB_TOKEN', value: 'Personal Access Token (izin Contents: Read & Write)' },
+                        { label: 'GITHUB_OWNER', value: 'Username / organisasi pemilik repo' },
+                        { label: 'GITHUB_REPOS', value: 'Nama repo, pisahkan koma bila lebih dari satu' },
+                        { label: 'GITHUB_BRANCH', value: 'Opsional, default: main' },
                     ],
                 });
             } else {
@@ -359,11 +391,7 @@ export default function AdminDashboardPage() {
             const data = await res.json();
             if (data.success) {
                 // Auto sync ke GitHub di background
-                fetch('/api/admin/github/sync', {
-                    method: 'POST',
-                    headers: authHeaders(),
-                    body: JSON.stringify({ message: 'Update pengaturan website via Admin Dashboard' }),
-                }).catch(() => { });
+                autoSyncGitHub('Update pengaturan website via Admin Dashboard');
 
                 showToast('success', 'Pengaturan berhasil disimpan!');
                 openFloatingModal({
@@ -380,7 +408,7 @@ export default function AdminDashboardPage() {
                         { label: 'AutoGopay Key', value: settings.autogopay_api_key ? `${settings.autogopay_api_key.substring(0, 10)}...` : 'Belum diatur' },
                         { label: 'WijayaPay Key', value: settings.wijayapay_api_key ? `${settings.wijayapay_api_key.substring(0, 14)}...` : 'Belum diatur' },
                         { label: 'Status Database', value: '✓ Tersimpan di Supabase Cloud' },
-                        { label: 'Sinkronisasi GitHub', value: '✓ Terkirim ke repo GitHub (delay ~1 mnt)' },
+                        { label: 'Sinkronisasi GitHub', value: ghStatusNote },
                     ],
                 });
                 loadAllData();
@@ -498,11 +526,7 @@ export default function AdminDashboardPage() {
             const data = await res.json();
             if (data.success) {
                 // Auto sync ke GitHub di background
-                fetch('/api/admin/github/sync', {
-                    method: 'POST',
-                    headers: authHeaders(),
-                    body: JSON.stringify({ message: `Update produk ${editingProduct.name} via Admin Dashboard` }),
-                }).catch(() => { });
+                autoSyncGitHub(`Update produk ${editingProduct.name} via Admin Dashboard`);
 
                 showToast('success', isEdit ? 'Produk berhasil diperbarui!' : 'Produk baru berhasil ditambahkan!');
                 openFloatingModal({
@@ -519,7 +543,7 @@ export default function AdminDashboardPage() {
                         { label: 'Publisher / Dev', value: editingProduct.publisher || '-' },
                         { label: 'Status Produk', value: editingProduct.is_active ? 'Aktif (Dijual)' : 'Nonaktif (Draft)' },
                         { label: 'Status Database', value: '✓ Berhasil Disimpan ke Supabase' },
-                        { label: 'Sinkronisasi GitHub', value: '✓ Terkirim ke repo GitHub (delay ~1 mnt)' },
+                        { label: 'Sinkronisasi GitHub', value: ghStatusNote },
                     ],
                 });
                 setIsProductModalOpen(false);
@@ -679,11 +703,7 @@ export default function AdminDashboardPage() {
             const data = await res.json();
             if (data.success) {
                 // Auto sync ke GitHub di background
-                fetch('/api/admin/github/sync', {
-                    method: 'POST',
-                    headers: authHeaders(),
-                    body: JSON.stringify({ message: `Update SKU ${editingSku.name || editingSku.sku} via Admin Dashboard` }),
-                }).catch(() => { });
+                autoSyncGitHub(`Update SKU ${editingSku.name || editingSku.sku} via Admin Dashboard`);
 
                 showToast('success', isEdit ? 'Item SKU berhasil diupdate!' : 'Item SKU baru berhasil ditambahkan!');
                 openFloatingModal({
@@ -701,7 +721,7 @@ export default function AdminDashboardPage() {
                         { label: 'Modal (USD)', value: editingSku.cost_usd ? `$${editingSku.cost_usd}` : '-' },
                         { label: 'Badge / Label', value: editingSku.badge || 'PROMO' },
                         { label: 'Status Database', value: '✓ Berhasil Disimpan ke Supabase' },
-                        { label: 'Sinkronisasi GitHub', value: '✓ Terkirim ke repo GitHub (delay ~1 mnt)' },
+                        { label: 'Sinkronisasi GitHub', value: ghStatusNote },
                     ],
                 });
                 setEditingSku(null);
@@ -1042,11 +1062,7 @@ export default function AdminDashboardPage() {
             const data = await res.json();
             if (data.success) {
                 // Auto sync ke GitHub di background
-                fetch('/api/admin/github/sync', {
-                    method: 'POST',
-                    headers: authHeaders(),
-                    body: JSON.stringify({ message: `Update harga massal (${profitDesc}) via Admin Dashboard` }),
-                }).catch(() => { });
+                autoSyncGitHub(`Update harga massal (${profitDesc}) via Admin Dashboard`);
 
                 showToast('success', data.message || 'Harga massal berhasil diterapkan!');
                 openFloatingModal({
@@ -1063,7 +1079,7 @@ export default function AdminDashboardPage() {
                         { label: 'Kurs USD Digunakan', value: `Rp ${Number(bulkUsdRate).toLocaleString('id-ID')}` },
                         { label: 'Pembulatan Harga', value: `Rp ${Number(bulkRounding).toLocaleString('id-ID')}` },
                         { label: 'Status Database', value: '✓ Berhasil Disimpan ke Supabase' },
-                        { label: 'Sinkronisasi GitHub', value: '✓ Terkirim ke repo GitHub (delay ~1 mnt)' },
+                        { label: 'Sinkronisasi GitHub', value: ghStatusNote },
                     ],
                 });
                 setIsBulkModalOpen(false);

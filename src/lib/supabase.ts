@@ -63,11 +63,9 @@ export async function saveOrder(order: Order & { user_id?: string }): Promise<Or
 export async function getOrder(identifier: string): Promise<Order | null> {
     const id = (identifier || '').trim();
     if (!SAFE_ID.test(id)) return null;
-    const db = requireDb();
-    const a = await db.from('orders').select('*').eq('invoice_no', id).maybeSingle();
-    if (a.data) return a.data as Order;
-    const b = await db.from('orders').select('*').eq('ref_id', id).maybeSingle();
-    return (b.data as Order) || null;
+    // 1 query saja (id sudah divalidasi SAFE_ID, aman dipakai di filter .or)
+    const { data } = await requireDb().from('orders').select('*').or(`invoice_no.eq.${id},ref_id.eq.${id}`).limit(1).maybeSingle();
+    return (data as Order) || null;
 }
 
 export async function updateOrder(refId: string, updates: Partial<Order>): Promise<Order | null> {
@@ -104,6 +102,13 @@ export async function getAllOrders(limit = 100): Promise<Order[]> {
     return (data || []) as Order[];
 }
 
+/** Hanya pesanan PENDING (untuk "Cek Semua Pending") — tidak perlu memuat 100 pesanan penuh. */
+export async function getPendingOrders(limit = 50): Promise<Order[]> {
+    const { data, error } = await requireDb().from('orders').select('*').eq('status', 'PENDING').order('created_at', { ascending: false }).limit(limit);
+    if (error) throw new Error(error.message);
+    return (data || []) as Order[];
+}
+
 export async function getOrdersByUser(userId: string, limit = 30): Promise<Order[]> {
     const { data, error } = await requireDb()
         .from('orders')
@@ -118,8 +123,6 @@ export async function getOrdersByUser(userId: string, limit = 30): Promise<Order
 export async function deleteOrder(identifier: string): Promise<boolean> {
     const id = (identifier || '').trim();
     if (!SAFE_ID.test(id)) return false;
-    const db = requireDb();
-    await db.from('orders').delete().eq('invoice_no', id);
-    await db.from('orders').delete().eq('ref_id', id);
+    await requireDb().from('orders').delete().or(`invoice_no.eq.${id},ref_id.eq.${id}`);
     return true;
 }

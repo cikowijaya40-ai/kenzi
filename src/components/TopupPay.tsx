@@ -16,29 +16,52 @@ function useCountdown(deadline: number | null) {
     return left;
 }
 
+
+/**
+ * Polling hemat invocation: jeda saat tab tersembunyi (lanjut seketika saat dibuka lagi),
+ * dan berhenti setelah batas waktu (tagihan kedaluwarsa). Webhook tetap jalur utama pelunasan.
+ */
+function startPolling(tick: () => Promise<number | null>, stopAt: () => number) {
+    let alive = true;
+    let timer: any;
+    const run = async () => {
+        clearTimeout(timer);
+        if (!alive) return;
+        if (document.hidden) return; // lanjut lewat visibilitychange
+        const next = await tick();
+        if (!alive || next === null) return;
+        if (stopAt() && Date.now() > stopAt()) return;
+        timer = setTimeout(run, next);
+    };
+    const onVis = () => { if (!document.hidden) run(); };
+    document.addEventListener('visibilitychange', onVis);
+    run();
+    return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
+}
+
 export default function TopupPay({ invoice }: { invoice: string }) {
     const router = useRouter();
     const [t, setT] = useState<any>(null);
     const [err, setErr] = useState('');
     const tries = useRef(0);
 
+    const stopAt = useRef(0);
     useEffect(() => {
-        let alive = true;
-        let timer: any;
-        const tick = async () => {
+        tries.current = 0;
+        return startPolling(async () => {
             const r: any = await api(`/api/wallet/topup/${invoice}`);
-            if (!alive) return;
-            if (r.status === 401) return router.replace(`/login?next=/topup/${invoice}`);
-            if (!r.success) return setErr(r.message || 'Tagihan tidak ditemukan.');
+            if (r.status === 401) { router.replace(`/login?next=/topup/${invoice}`); return null; }
+            if (!r.success) { setErr(r.message || 'Tagihan tidak ditemukan.'); return null; }
             setT(r.topup);
-            if (r.topup.status === 'PAID') { setMeBalance(r.balance); return; }
-            if (r.topup.status !== 'PENDING') return;
+            if (r.topup.status === 'PAID') { setMeBalance(r.balance); return null; }
+            if (r.topup.status !== 'PENDING') return null;
             tries.current++;
+            const c = new Date(r.topup.created_at).getTime();
+            const e = r.topup.payment?.expired ? new Date(String(r.topup.payment.expired).replace(' ', 'T')).getTime() : NaN;
+            stopAt.current = (Number.isFinite(e) && e > c ? e : c + 15 * 60_000) + 120_000;
             // Polling hemat: 5 dtk di awal, melambat bertahap (maks 20 dtk) — hemat invocation Vercel
-            timer = setTimeout(tick, Math.min(5000 + tries.current * 1000, 20000));
-        };
-        tick();
-        return () => { alive = false; clearTimeout(timer); };
+            return Math.min(5000 + tries.current * 1000, 20000);
+        }, () => stopAt.current);
     }, [invoice, router]);
 
     const created = t ? new Date(t.created_at).getTime() : 0;

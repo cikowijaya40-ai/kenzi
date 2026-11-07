@@ -173,6 +173,7 @@ create table if not exists orders (
 alter table orders add column if not exists user_id uuid references users(id) on delete set null;
 create index if not exists orders_user_idx on orders (user_id, created_at desc);
 create index if not exists orders_status_idx on orders (status, created_at desc);
+create index if not exists orders_pending_idx on orders (created_at desc) where status = 'PENDING';
 create index if not exists idx_product_items_slug on product_items (product_slug);
 create index if not exists idx_products_active on products (is_active, sort_order);
 
@@ -376,7 +377,7 @@ end $$;
 create or replace function run_maintenance()
 returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare a int; b int; c int; d int; e int;
+declare a int; b int; c int; d int; e int; f int; g int; h int;
 begin
   update topups set status = 'EXPIRED' where status = 'PENDING' and created_at < now() - interval '2 hours';
   get diagnostics a = row_count;
@@ -393,8 +394,20 @@ begin
      and not exists (select 1 from orders o where o.user_id = u.id and o.status in ('PAID'))
      and not exists (select 1 from topups t where t.user_id = u.id and t.status = 'PAID');
   get diagnostics e = row_count;
+  -- HEMAT STORAGE (batas gratis 500MB): buang tagihan yang TIDAK PERNAH dibayar & sudah > 45 hari
+  delete from orders where status in ('EXPIRED','CANCELLED') and created_at < now() - interval '45 days';
+  get diagnostics f = row_count;
+  delete from topups where status in ('EXPIRED','FAILED','CANCELLED') and created_at < now() - interval '45 days';
+  get diagnostics g = row_count;
+  -- Pesanan lunas > 90 hari: data QR/tutorial pembayaran tidak dipakai lagi (yang disimpan hanya nama gateway)
+  update orders set payment_data = jsonb_build_object('gateway_provider', payment_data->'gateway_provider')
+   where status = 'PAID' and created_at < now() - interval '90 days'
+     and payment_data is not null and payment_data <> '{}'::jsonb
+     and (select count(*) from jsonb_object_keys(payment_data)) > 1;
+  get diagnostics h = row_count;
   return jsonb_build_object('topups_expired', a, 'rate_limits_purged', b, 'reset_purged', c,
-                            'orders_expired', d, 'guest_users_purged', e);
+                            'orders_expired', d, 'guest_users_purged', e,
+                            'old_unpaid_orders_purged', f, 'old_unpaid_topups_purged', g, 'old_payment_data_trimmed', h);
 end $$;
 
 

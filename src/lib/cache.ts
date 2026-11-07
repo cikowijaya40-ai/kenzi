@@ -43,6 +43,6 @@ export function bust(prefix: string) {
 
 /** Header Cache-Control untuk endpoint publik: di-cache CDN Vercel (hemat invocation & DB). */
 export const PUBLIC_CACHE_HEADERS = {
-    'Cache-Control': 'public, max-age=0, s-maxage=60, stale-while-revalidate=300',
+    'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=300',
 };
 export const NO_STORE_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };

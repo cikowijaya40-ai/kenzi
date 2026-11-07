@@ -11,10 +11,16 @@ const DEFAULT_GH_CONFIG = {
     filePath: 'data/store-data.json',
 };
 
+/** true bila GITHUB_TOKEN, GITHUB_OWNER, dan GITHUB_REPOS sudah diisi di environment. */
+export function isGitHubConfigured(): boolean {
+    const { token, owner, repos } = DEFAULT_GH_CONFIG;
+    return Boolean(token && owner && repos.length);
+}
+
 export async function syncStoreToGitHub(commitMessage?: string, customData?: any) {
     const { token, owner, repos, branch, filePath } = DEFAULT_GH_CONFIG;
     if (!token || !owner || !repos.length) {
-        return { success: false, error: 'GitHub sync belum dikonfigurasi (GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPOS)' };
+        return { success: false, code: 'NOT_CONFIGURED' as const, error: 'GitHub sync belum dikonfigurasi (GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPOS)' };
     }
 
     const headers = {
@@ -59,7 +65,7 @@ export async function syncStoreToGitHub(commitMessage?: string, customData?: any
 
             const nowStr = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
             const body: any = {
-                message: commitMessage || `Auto-sync data via Admin Dashboard (${nowStr})`,
+                message: `${commitMessage || `Auto-sync data via Admin Dashboard (${nowStr})`} [skip ci]`,
                 content: base64Content,
                 branch: branch,
             };
@@ -95,6 +101,6 @@ export async function syncStoreToGitHub(commitMessage?: string, customData?: any
         success: true,
         commitSha: lastCommitSha,
         commitUrl: lastCommitUrl,
-        delayNotice: 'Tampilan website di Vercel akan terupdate otomatis ~1 menit ke depan karena proses build & delay di GitHub.',
+        delayNotice: 'Backup tersimpan di GitHub. Website membaca data langsung dari Supabase, jadi tidak perlu build ulang.',
     };
 }

@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 
 const BUCKET_NAME = 'store-assets';
+const MAX_DATA_URL_BYTES = 150 * 1024;
 
 export async function POST(req: Request) {
     const isAuth = await verifyAdminAuth(req);
@@ -78,23 +79,18 @@ export async function POST(req: Request) {
         const client = getSupabaseAdmin();
         if (client) {
             try {
-                // Ensure bucket exists
-                const { data: buckets } = await client.storage.listBuckets();
-                const exists = buckets?.some((b: any) => b.name === BUCKET_NAME);
-                if (!exists) {
-                    await client.storage.createBucket(BUCKET_NAME, {
-                        public: true,
-                        fileSizeLimit: 10485760,
-                    });
+                // Nama file unik (timestamp) → aman di-cache 1 tahun: hemat bandwidth (egress) Supabase.
+                const doUpload = () => client.storage.from(BUCKET_NAME).upload(fileName, fileBuffer!, {
+                    contentType: mimeType,
+                    upsert: false,
+                    cacheControl: '31536000',
+                });
+                let { data: uploadData, error: uploadErr } = await doUpload();
+                // Bucket dibuat hanya bila memang belum ada (bukan cek listBuckets di setiap upload)
+                if (uploadErr && /bucket.*not.*found|not found/i.test(uploadErr.message || '')) {
+                    await client.storage.createBucket(BUCKET_NAME, { public: true, fileSizeLimit: 10485760 });
+                    ({ data: uploadData, error: uploadErr } = await doUpload());
                 }
-
-                // Upload to Supabase Storage
-                const { data: uploadData, error: uploadErr } = await client.storage
-                    .from(BUCKET_NAME)
-                    .upload(fileName, fileBuffer, {
-                        contentType: mimeType,
-                        upsert: true,
-                    });
 
                 if (!uploadErr && uploadData) {
                     const { data: pubData } = client.storage.from(BUCKET_NAME).getPublicUrl(fileName);
@@ -112,6 +108,14 @@ export async function POST(req: Request) {
             } catch (err: any) {
                 console.warn('Supabase storage exception:', err);
             }
+        }
+
+        // Data URL disimpan di database & ikut terkirim ke SETIAP pengunjung → hanya boleh untuk gambar kecil.
+        if (fileBuffer.length > MAX_DATA_URL_BYTES) {
+            return NextResponse.json({
+                success: false,
+                message: 'Storage Supabase belum siap, dan gambar terlalu besar untuk disimpan sebagai Data URL (maks 150KB). Cek bucket "store-assets" / SUPABASE_SERVICE_ROLE_KEY, atau kecilkan gambar.',
+            }, { status: 503 });
         }
 
         // Fallback: If Supabase Storage is not ready, return base64 Data URL so user is never blocked

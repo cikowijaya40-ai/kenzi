@@ -57,7 +57,7 @@ async function loadAllProducts(includeInactive: boolean = false): Promise<Produc
                     };
                 });
 
-                globalForProducts.cachedProducts = fullProducts; bust('products:');
+                globalForProducts.cachedProducts = fullProducts;
                 return fullProducts;
             }
         } catch (e) {

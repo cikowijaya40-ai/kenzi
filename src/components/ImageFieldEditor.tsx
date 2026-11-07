@@ -194,17 +194,20 @@ export default function ImageFieldEditor({
             console.warn('Upload API error, falling back to FileReader:', err);
             setUploadProgress('Menyimpan secara lokal...');
 
-            // Fallback: Read as base64 Data URL so user is never blocked
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const base64 = e.target?.result as string;
-                if (base64) {
-                    onChange(base64);
-                    setImgError(false);
-                    setMode('url');
+            // Fallback: Data URL disimpan di database dan terkirim ke SETIAP pengunjung — hanya untuk gambar kecil (≤150KB)
+            try {
+                const small = await compressImage(file, 800, 0.7);
+                if (small.size > 150 * 1024) {
+                    alert('Upload ke Storage gagal dan gambar terlalu besar untuk disimpan lokal (maks 150KB). Cek koneksi/Storage Supabase lalu coba lagi, atau kecilkan gambar.');
+                } else {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const base64 = e.target?.result as string;
+                        if (base64) { onChange(base64); setImgError(false); setMode('url'); }
+                    };
+                    reader.readAsDataURL(small);
                 }
-            };
-            reader.readAsDataURL(file);
+            } catch { /* abaikan */ }
         } finally {
             setIsUploading(false);
             setUploadProgress('');

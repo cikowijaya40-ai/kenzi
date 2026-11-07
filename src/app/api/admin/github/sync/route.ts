@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAdminAuth } from '@/lib/security';
-import { syncStoreToGitHub } from '@/lib/github';
+import { isGitHubConfigured, syncStoreToGitHub } from '@/lib/github';
 import { getAllProducts } from '@/lib/products';
 import { getSiteSettings } from '@/lib/settings';
 
@@ -11,6 +11,15 @@ export async function POST(req: NextRequest) {
     const isAuth = await verifyAdminAuth(req);
     if (!isAuth) {
         return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // GitHub sync bersifat opsional: env belum diisi → balas jelas (bukan error 500) dan jangan baca database sama sekali
+    if (!isGitHubConfigured()) {
+        return NextResponse.json({
+            success: false,
+            code: 'NOT_CONFIGURED',
+            error: 'GitHub sync belum dikonfigurasi (GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPOS)',
+        });
     }
 
     try {
@@ -49,7 +58,7 @@ export async function POST(req: NextRequest) {
             success: true,
             commitUrl: result.commitUrl,
             commitSha: result.commitSha,
-            message: 'Berhasil update ke GitHub! Tampilan akan terupdate ~1 menit ke depan karena proses deploy Vercel.',
+            message: 'Berhasil backup ke GitHub. Website tetap membaca Supabase, tidak perlu build ulang.',
         });
     } catch (e: any) {
         return NextResponse.json({ success: false, error: e.message }, { status: 500 });
