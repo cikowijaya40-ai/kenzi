@@ -17,6 +17,7 @@ export async function GET() {
             slug: p.slug, name: p.name, category_slug: p.category_slug, icon_url: p.icon_url, banner_url: p.banner_url || '',
             description: p.description || '', badge: p.badge || '', publisher: p.publisher || '',
             input_label_1: p.input_label_1, input_placeholder_1: p.input_placeholder_1, is_featured: p.is_featured,
+            maintenance: Boolean(p.maintenance), maintenance_note: p.maintenance ? (p.maintenance_note || '') : '',
             items: (p.items || []).filter((i) => i.is_active !== false).map((i) => ({
                 sku: i.sku, name: i.name, price: Number(i.price), original_price: Number(i.original_price || i.price),
                 badge: i.badge || '', in_stock: i.in_stock !== false && (i.stock ?? 999) > 0, stock: Math.max(0, Number(i.stock ?? 999)),

@@ -9,6 +9,13 @@ const STATUS: Record<string, [string, string]> = {
     PENDING: ['MENUNGGU BAYAR', 'wait'], EXPIRED: ['KEDALUWARSA', 'bad'], CANCELLED: ['DIBATALKAN', 'bad'],
 };
 
+/** Batas waktu bayar: expired dari gateway, atau 15 menit sejak dibuat. */
+function orderDeadline(o: any): number {
+    const created = new Date(o.created_at).getTime();
+    const exp = o?.payment?.expired ? new Date(String(o.payment.expired).replace(' ', 'T')).getTime() : NaN;
+    return Number.isFinite(exp) && exp > created ? exp : created + 15 * 60_000;
+}
+
 function useCountdown(deadline: number | null) {
     const [left, setLeft] = useState(0);
     useEffect(() => {
@@ -21,29 +28,6 @@ function useCountdown(deadline: number | null) {
     return left;
 }
 
-
-/**
- * Polling hemat invocation: jeda saat tab tersembunyi (lanjut seketika saat dibuka lagi),
- * dan berhenti setelah batas waktu (tagihan kedaluwarsa). Webhook tetap jalur utama pelunasan.
- */
-function startPolling(tick: () => Promise<number | null>, stopAt: () => number) {
-    let alive = true;
-    let timer: any;
-    const run = async () => {
-        clearTimeout(timer);
-        if (!alive) return;
-        if (document.hidden) return; // lanjut lewat visibilitychange
-        const next = await tick();
-        if (!alive || next === null) return;
-        if (stopAt() && Date.now() > stopAt()) return;
-        timer = setTimeout(run, next);
-    };
-    const onVis = () => { if (!document.hidden) run(); };
-    document.addEventListener('visibilitychange', onVis);
-    run();
-    return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
-}
-
 export default function OrderView({ invoice }: { invoice: string }) {
     const router = useRouter();
     const [o, setO] = useState<any>(null);
@@ -51,25 +35,37 @@ export default function OrderView({ invoice }: { invoice: string }) {
     const [copied, setCopied] = useState('');
     const tries = useRef(0);
 
-    /* Polling: selama menunggu bayar (atau lunas tapi lisensi belum terkirim). Melambat bertahap (maks 20 dtk),
-       berhenti saat tab tersembunyi / setelah tagihan kedaluwarsa (+2 mnt toleransi) agar hemat invocation. */
-    const stopAt = useRef(0);
+    /* Polling: selama menunggu bayar (atau lunas tapi lisensi belum terkirim).
+       Hemat invocation Vercel: melambat bertahap, JEDA saat tab tersembunyi (mis. sedang di aplikasi e-wallet,
+       langsung cek lagi begitu tab terlihat), dan berhenti setelah batas bayar lewat. */
     useEffect(() => {
-        tries.current = 0;
-        return startPolling(async () => {
-            const r: any = await api(`/api/order/${invoice}`);
-            if (r.status === 401) { router.replace(`/login?next=/order/${invoice}`); return null; }
-            if (!r.success) { setErr(r.message || 'Pesanan tidak ditemukan.'); return null; }
-            setO(r.order);
-            const waiting = r.order.status === 'PENDING' || (r.order.status === 'PAID' && r.order.delivery_status !== 'DELIVERED');
-            if (!waiting) return null;
-            tries.current++;
-            if (r.order.status === 'PAID' && tries.current > 40) return null;
-            const c = new Date(r.order.created_at).getTime();
-            const e = r.order.payment?.expired ? new Date(String(r.order.payment.expired).replace(' ', 'T')).getTime() : NaN;
-            stopAt.current = r.order.status === 'PENDING' ? ((Number.isFinite(e) && e > c ? e : c + 15 * 60_000) + 120_000) : 0;
-            return Math.min(4000 + tries.current * 1000, 20000);
-        }, () => stopAt.current);
+        let alive = true;
+        let timer: any;
+        let busy = false;
+        let paused = false;
+        const tick = async (force = false) => {
+            if (busy) return;
+            if (document.hidden && !force) { paused = true; return; }
+            busy = true;
+            paused = false;
+            try {
+                const r: any = await api(`/api/order/${invoice}`);
+                if (!alive) return;
+                if (r.status === 401) return router.replace(`/login?next=/order/${invoice}`);
+                if (!r.success) return setErr(r.message || 'Pesanan tidak ditemukan.');
+                setO(r.order);
+                const waiting = r.order.status === 'PENDING' || (r.order.status === 'PAID' && r.order.delivery_status !== 'DELIVERED');
+                if (!waiting) return;
+                tries.current++;
+                if (r.order.status === 'PAID' && tries.current > 40) return;
+                if (r.order.status === 'PENDING' && Date.now() > orderDeadline(r.order) + 180_000) return; // sudah kedaluwarsa: berhenti
+                timer = setTimeout(() => tick(), Math.min(4000 + tries.current * 1000, 15000));
+            } finally { busy = false; }
+        };
+        const onVisible = () => { if (!document.hidden && paused && alive) tick(); };
+        document.addEventListener('visibilitychange', onVisible);
+        tick(true);
+        return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
     }, [invoice, router]);
 
     const created = o ? new Date(o.created_at).getTime() : 0;

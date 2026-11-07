@@ -8,6 +8,26 @@ const globalForProducts = globalThis as unknown as {
 };
 
 /**
+ * Kolom maintenance (products.maintenance / maintenance_note) ditambahkan lewat migrasi SQL.
+ * Kalau migrasi belum dijalankan, query yang menyertakan kolom itu ditolak Supabase. Helper di bawah
+ * mendeteksi kasus itu supaya simpan produk biasa TETAP berhasil (tanpa mode maintenance).
+ */
+export const MAINTENANCE_MIGRATION_WARNING =
+    'Kolom maintenance belum ada di database. Jalankan file supabase/migrations/2026-11-product-maintenance.sql di Supabase SQL Editor, lalu simpan lagi. Perubahan lain sudah tersimpan.';
+
+function isMissingMaintenanceColumn(err: any): boolean {
+    if (!err) return false;
+    const msg = `${err.message || ''} ${err.details || ''} ${err.hint || ''}`.toLowerCase();
+    if (!msg.includes('maintenance')) return false;
+    return err.code === 'PGRST204' || err.code === '42703' || msg.includes('column') || msg.includes('schema cache');
+}
+
+function withoutMaintenance<T extends Record<string, any>>(payload: T): Omit<T, 'maintenance' | 'maintenance_note'> {
+    const { maintenance, maintenance_note, ...rest } = payload as any;
+    return rest;
+}
+
+/**
  * Dapatkan semua produk dan SKU/Stok langsung dari Supabase sebagai Database Utama
  */
 async function loadAllProducts(includeInactive: boolean = false): Promise<Product[]> {
@@ -57,7 +77,7 @@ async function loadAllProducts(includeInactive: boolean = false): Promise<Produc
                     };
                 });
 
-                globalForProducts.cachedProducts = fullProducts;
+                globalForProducts.cachedProducts = fullProducts; bust('products:');
                 return fullProducts;
             }
         } catch (e) {
@@ -152,6 +172,8 @@ export async function createProduct(newProdData: Partial<Product>): Promise<Prod
         has_zone_id: Boolean(newProdData.has_zone_id),
         is_active: newProdData.is_active !== undefined ? newProdData.is_active : true,
         is_featured: newProdData.is_featured !== undefined ? newProdData.is_featured : true,
+        maintenance: Boolean(newProdData.maintenance),
+        maintenance_note: newProdData.maintenance_note ? String(newProdData.maintenance_note).trim().slice(0, 300) : null,
         sort_order: newProdData.sort_order || all.length + 1,
         items: newProdData.items || [],
     };
@@ -160,10 +182,22 @@ export async function createProduct(newProdData: Partial<Product>): Promise<Prod
     const client = getSupabaseAdmin() || getSupabase();
     if (client) {
         try {
-            const { items, id, ...prodPayload } = newProduct;
-            const { data, error } = await client.from('products').insert([prodPayload]).select();
+            const { items, id, _warning, ...fullPayload } = newProduct;
+            // Produk baru yang tidak maintenance tidak perlu mengirim kolom maintenance sama sekali
+            const prodPayload: Record<string, any> = newProduct.maintenance ? fullPayload : withoutMaintenance(fullPayload);
+            let { data, error } = await client.from('products').insert([prodPayload]).select();
+            if (error && isMissingMaintenanceColumn(error)) {
+                ({ data, error } = await client.from('products').insert([withoutMaintenance(prodPayload)]).select());
+                if (newProduct.maintenance) {
+                    newProduct.maintenance = false;
+                    newProduct.maintenance_note = null;
+                    newProduct._warning = MAINTENANCE_MIGRATION_WARNING;
+                }
+            }
             if (!error && data && data[0]) {
                 newProduct.id = data[0].id;
+            } else if (error) {
+                console.warn('Gagal insert product ke Supabase:', error);
             }
             if (items && items.length > 0) {
                 const cleanItems = items.map(({ id, ...i }) => ({
@@ -179,10 +213,12 @@ export async function createProduct(newProdData: Partial<Product>): Promise<Prod
         }
     }
 
-    all.push(newProduct);
+    // Jangan simpan penanda peringatan ke cache; cukup dikembalikan ke pemanggil
+    const { _warning: createWarning, ...storedProduct } = newProduct;
+    all.push(storedProduct);
     globalForProducts.cachedProducts = all; bust('products:');
 
-    return newProduct;
+    return createWarning ? { ...storedProduct, _warning: createWarning } : storedProduct;
 }
 
 /**
@@ -194,19 +230,38 @@ export async function updateProduct(slug: string, updates: Partial<Product>): Pr
     if (index === -1) return null;
 
     const existing = all[index];
+
+    // Rapikan input maintenance dari form admin
+    const cleanUpdates: Partial<Product> = { ...updates };
+    delete cleanUpdates._warning;
+    if (cleanUpdates.maintenance !== undefined) cleanUpdates.maintenance = Boolean(cleanUpdates.maintenance);
+    if (cleanUpdates.maintenance_note !== undefined) {
+        cleanUpdates.maintenance_note = cleanUpdates.maintenance_note ? String(cleanUpdates.maintenance_note).trim().slice(0, 300) || null : null;
+    }
+
     const updated: Product = {
         ...existing,
-        ...updates,
+        ...cleanUpdates,
         slug: existing.slug,
-        items: updates.items !== undefined ? updates.items : existing.items,
+        items: cleanUpdates.items !== undefined ? cleanUpdates.items : existing.items,
     };
 
     // Update di Supabase
     const client = getSupabaseAdmin() || getSupabase();
     if (client) {
         try {
-            const { items, id, ...prodPayload } = updated;
-            await client.from('products').update(prodPayload).eq('slug', slug);
+            const { items, id, _warning, ...prodPayload } = updated;
+            let { error: updErr } = await client.from('products').update(prodPayload).eq('slug', slug);
+            if (updErr && isMissingMaintenanceColumn(updErr)) {
+                // Migrasi belum dijalankan: simpan semua field lain, abaikan kolom maintenance
+                ({ error: updErr } = await client.from('products').update(withoutMaintenance(prodPayload)).eq('slug', slug));
+                if (Boolean(cleanUpdates.maintenance) !== Boolean(existing.maintenance)) {
+                    updated._warning = MAINTENANCE_MIGRATION_WARNING;
+                }
+                updated.maintenance = Boolean(existing.maintenance);
+                updated.maintenance_note = existing.maintenance_note ?? null;
+            }
+            if (updErr) console.warn('Gagal update product di Supabase:', updErr);
 
             // CASCADE VISIBILITAS: kalau status publik/private produk berubah,
             // semua SKU di dalamnya harus ikut. Tanpa ini, SKU hasil sync Drip
@@ -229,10 +284,11 @@ export async function updateProduct(slug: string, updates: Partial<Product>): Pr
         }
     }
 
-    all[index] = updated;
+    const { _warning: updateWarning, ...storedUpdated } = updated;
+    all[index] = storedUpdated;
     globalForProducts.cachedProducts = all; bust('products:');
 
-    return updated;
+    return updateWarning ? { ...storedUpdated, _warning: updateWarning } : storedUpdated;
 }
 
 /**

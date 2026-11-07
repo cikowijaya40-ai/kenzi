@@ -1,5 +1,5 @@
 import { getOrder, requireDb } from './supabase';
-import { createCharge, deliverLicense, gatewayVerdict } from './wallet';
+import { createCharge, deliverLicense, gatewayVerdict, maintenanceMessage } from './wallet';
 import { sendPlainMail } from './email';
 import { getSiteSettings } from './settings';
 import { readInitCred } from './guest';
@@ -18,8 +18,13 @@ export async function createQrisOrder(user: { id: string; email: string }, input
     const db = requireDb();
 
     // Harga & ketersediaan dibaca dari database (server-authoritative), tidak pernah dari klien.
-    const { data: pr } = await db.from('products').select('slug, name, is_active').eq('slug', input.productSlug).maybeSingle();
+    // select('*') (bukan daftar kolom) supaya tetap jalan walau kolom maintenance belum dimigrasi
+    const { data: pr } = await db.from('products').select('*').eq('slug', input.productSlug).maybeSingle();
     const { data: it } = await db.from('product_items').select('sku, name, price, is_active, in_stock, stock').eq('product_slug', input.productSlug).eq('sku', input.itemSku).maybeSingle();
+    // Produk sedang maintenance: tolak pesanan baru (pesanan yang sudah dibayar tetap diproses di settleOrderPayment)
+    if (pr && pr.is_active !== false && pr.maintenance === true) {
+        return { success: false as const, code: 'MAINTENANCE', message: maintenanceMessage(pr.name, pr.maintenance_note) };
+    }
     const available = pr && it && pr.is_active !== false && it.is_active !== false && it.in_stock !== false && Number(it.stock ?? 999) > 0;
     const price = it ? Math.round(Number(it.price)) : 0;
     if (!available || price <= 0) return { success: false as const, code: 'ITEM_UNAVAILABLE', message: 'Produk/varian tidak tersedia atau stok habis.' };

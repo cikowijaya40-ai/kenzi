@@ -91,12 +91,13 @@ export default function CatalogView({ home = false }: { home?: boolean }) {
                 {loading && !products.length && Array.from({ length: 4 }).map((_, i) => <div key={i} className="kx-card skeleton" />)}
                 {shown.map((p) => {
                     const items = p.items || [];
+                    const maint = !!p.maintenance;
                     const soldOut = items.length > 0 && items.every((i) => !i.in_stock);
                     const prices = items.filter((i) => i.in_stock).map((i) => i.price);
                     const min = prices.length ? Math.min(...prices) : items.length ? Math.min(...items.map((i) => i.price)) : 0;
                     const desc = (p.description || '').replace(/\s+/g, ' ').trim().slice(0, 140);
                     return (
-                        <article key={p.slug} className="kx-card">
+                        <article key={p.slug} className={`kx-card${maint ? ' maint' : ''}`}>
                             <div className="side">
                                 <Link href={`/produk/${p.slug}`} className="img" aria-label={p.name} onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setSheetSlug(p.slug); }}>
                                     <img src={fixImg(p.icon_url || p.banner_url)} alt={p.name} loading="lazy" decoding="async" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />
@@ -111,15 +112,20 @@ export default function CatalogView({ home = false }: { home?: boolean }) {
                                 <h3>{p.name}</h3>
                                 {desc && <p className="desc">{desc}</p>}
                                 <div className="meta">
-                                    {soldOut
-                                        ? <span className="pill out"><i /> Habis</span>
-                                        : <span className="pill on"><i /> Tersedia</span>}
+                                    {maint
+                                        ? <span className="pill maint"><i /> Maintenance</span>
+                                        : soldOut
+                                            ? <span className="pill out"><i /> Habis</span>
+                                            : <span className="pill on"><i /> Tersedia</span>}
                                     <span className="auto"><i className="fa-solid fa-bolt" /> Key otomatis</span>
                                 </div>
+                                {maint && p.maintenance_note && <p className="maint-note"><i className="fa-solid fa-screwdriver-wrench" /> {p.maintenance_note}</p>}
                                 <div className="buy">
-                                    {soldOut
-                                        ? <button disabled><i className="fa-solid fa-ban" /> STOK HABIS</button>
-                                        : <button onClick={() => setSheetSlug(p.slug)}><i className="fa-solid fa-cart-shopping" /> BELI SEKARANG</button>}
+                                    {maint
+                                        ? <button className="maint" disabled><i className="fa-solid fa-screwdriver-wrench" /> SEDANG MAINTENANCE</button>
+                                        : soldOut
+                                            ? <button disabled><i className="fa-solid fa-ban" /> STOK HABIS</button>
+                                            : <button onClick={() => setSheetSlug(p.slug)}><i className="fa-solid fa-cart-shopping" /> BELI SEKARANG</button>}
                                 </div>
                             </div>
                         </article>

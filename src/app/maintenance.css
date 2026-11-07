@@ -1,0 +1,19 @@
+/* Mode maintenance per produk (diatur admin di Edit Produk) */
+
+/* Kartu katalog (tema terang) */
+.kx-card.maint .img img{filter:grayscale(.55) opacity(.8)}
+.kx-card .pill.maint{color:#b45309;background:#fff4de;border-color:#fcd9a0}
+.kx-card .buy button.maint,
+.kx-card .buy button.maint[disabled]{background:#fff4de;color:#b45309;border:1px solid #fcd9a0;box-shadow:none;cursor:not-allowed}
+.kx-card .maint-note{margin:8px 0 0;padding:7px 10px;border-radius:10px;background:#fff8ea;border:1px dashed #fcd9a0;color:#92400e;font-size:11.5px;line-height:1.45}
+
+/* Halaman detail produk */
+.kx-maint-banner{display:flex;gap:10px;align-items:flex-start;margin:0 0 14px;padding:12px 14px;border-radius:14px;background:#fff8ea;border:1px solid #fcd9a0;color:#92400e;font-size:13px;line-height:1.5}
+.kx-maint-banner i{margin-top:3px;color:#d97706}
+.kx-maint-banner b{display:block;font-weight:800;color:#78350f}
+
+/* BuySheet (tema gelap) */
+.ks-maint{display:flex;gap:10px;align-items:flex-start;margin-bottom:12px;padding:12px 14px;border-radius:14px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.45);color:#fcd34d;font-size:13px;line-height:1.5}
+.ks-maint i{margin-top:3px}
+.ks-maint b{display:block;font-weight:800;color:#fde68a}
+.ks-dur-sub em.maint{color:#fbbf24}

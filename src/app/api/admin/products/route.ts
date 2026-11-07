@@ -33,10 +33,12 @@ export async function POST(req: Request) {
             if (!updated) {
                 return NextResponse.json({ success: false, message: 'Produk tidak ditemukan' }, { status: 404 });
             }
-            return NextResponse.json({ success: true, message: 'Produk berhasil diupdate', data: updated });
+            const { _warning: updWarn, ...updData } = updated;
+            return NextResponse.json({ success: true, message: 'Produk berhasil diupdate', data: updData, warning: updWarn || undefined });
         } else {
             const created = await createProduct(productData);
-            return NextResponse.json({ success: true, message: 'Produk baru berhasil ditambahkan', data: created });
+            const { _warning: newWarn, ...newData } = created;
+            return NextResponse.json({ success: true, message: 'Produk baru berhasil ditambahkan', data: newData, warning: newWarn || undefined });
         }
     } catch (e: any) {
         return NextResponse.json({ success: false, message: e.message }, { status: 500 });

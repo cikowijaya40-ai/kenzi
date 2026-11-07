@@ -254,7 +254,10 @@ export default function AdminDashboardPage() {
         setPasswordInput('');
     };
 
-    const loadAllData = async (token = adminToken) => {
+    // Status DB (/api/setup) & saldo Thanhub tidak berubah akibat edit produk/pengaturan, jadi cukup dimuat sekali per sesi
+    // (kecuali tombol Refresh ditekan). Sebelumnya SETIAP simpan memicu 5 request; sekarang 3.
+    const extrasLoadedRef = React.useRef(false);
+    const loadAllData = async (token = adminToken, force = false) => {
         setLoadingData(true);
         const headers = { 'x-admin-pin': token };
 
@@ -274,18 +277,21 @@ export default function AdminDashboardPage() {
             const ordData = await ordRes.json();
             if (ordData.success) setOrders(ordData.data);
 
-            // Check Supabase status
-            const dbRes = await fetch('/api/setup');
-            const dbJson = await dbRes.json();
-            setDbStatus(dbJson);
+            if (force || !extrasLoadedRef.current) {
+                // Check Supabase status
+                const dbRes = await fetch('/api/setup');
+                const dbJson = await dbRes.json();
+                setDbStatus(dbJson);
 
-            // Saldo Thanhub (opsional)
-            try {
-                const tRes = await fetch('/api/admin/thanhub', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'balance' }) });
-                const tJson = await tRes.json();
-                if (tJson.success) setThBalance(Number(tJson.balance) || 0);
-            } catch (err) {
-                console.warn('Could not fetch Thanhub balance:', err);
+                // Saldo Thanhub (opsional)
+                try {
+                    const tRes = await fetch('/api/admin/thanhub', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'balance' }) });
+                    const tJson = await tRes.json();
+                    if (tJson.success) setThBalance(Number(tJson.balance) || 0);
+                } catch (err) {
+                    console.warn('Could not fetch Thanhub balance:', err);
+                }
+                extrasLoadedRef.current = true;
             }
         } catch (e: any) {
             showToast('error', 'Gagal memuat data dashboard: ' + e.message);
@@ -310,7 +316,6 @@ export default function AdminDashboardPage() {
             });
             const data = await res.json();
             if (data.success) {
-
                 showToast('success', 'Pengaturan berhasil disimpan!');
                 openFloatingModal({
                     type: 'success',
@@ -416,6 +421,8 @@ export default function AdminDashboardPage() {
             input_placeholder_2: 'Masukkan Zone ID',
             is_active: true,
             is_featured: true,
+            maintenance: false,
+            maintenance_note: '',
             sort_order: products.length + 1,
             items: [],
         });
@@ -442,8 +449,7 @@ export default function AdminDashboardPage() {
             });
             const data = await res.json();
             if (data.success) {
-
-                showToast('success', isEdit ? 'Produk berhasil diperbarui!' : 'Produk baru berhasil ditambahkan!');
+                showToast(data.warning ? 'error' : 'success', data.warning || (isEdit ? 'Produk berhasil diperbarui!' : 'Produk baru berhasil ditambahkan!'));
                 openFloatingModal({
                     type: 'success',
                     title: 'Database Supabase Berhasil Di-Update!',
@@ -457,6 +463,8 @@ export default function AdminDashboardPage() {
                         { label: 'Slug Produk', value: editingProduct.slug || '-' },
                         { label: 'Publisher / Dev', value: editingProduct.publisher || '-' },
                         { label: 'Status Produk', value: editingProduct.is_active ? 'Aktif (Dijual)' : 'Nonaktif (Draft)' },
+                        { label: 'Mode Maintenance', value: data.warning ? '⚠ Belum tersimpan (jalankan migrasi SQL)' : editingProduct.maintenance ? '🛠️ ON (tidak bisa dibeli)' : 'OFF (normal)' },
+                        ...(data.warning ? [{ label: 'Peringatan', value: data.warning }] : []),
                         { label: 'Status Database', value: '✓ Berhasil Disimpan ke Supabase' },
                     ],
                 });
@@ -616,7 +624,6 @@ export default function AdminDashboardPage() {
             });
             const data = await res.json();
             if (data.success) {
-
                 showToast('success', isEdit ? 'Item SKU berhasil diupdate!' : 'Item SKU baru berhasil ditambahkan!');
                 openFloatingModal({
                     type: 'success',
@@ -972,7 +979,6 @@ export default function AdminDashboardPage() {
             });
             const data = await res.json();
             if (data.success) {
-
                 showToast('success', data.message || 'Harga massal berhasil diterapkan!');
                 openFloatingModal({
                     type: 'success',
@@ -1438,7 +1444,7 @@ export default function AdminDashboardPage() {
                     </Link>
 
                     <button
-                        onClick={() => loadAllData()}
+                        onClick={() => loadAllData(adminToken, true)}
                         disabled={loadingData}
                         className="px-3.5 py-2 rounded-xl bg-[#101a3b] hover:bg-[#1a2a5a] text-xs font-bold text-gray-200 flex items-center gap-1.5 transition-colors border border-[#1a2a5a]"
                         title="Segarkan Data"
@@ -2080,6 +2086,11 @@ export default function AdminDashboardPage() {
                                                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-bold border border-amber-500/30 flex items-center gap-1 shadow-sm shadow-amber-950">
                                                             <Lock className="w-3 h-3" />
                                                             PRIVATE (DRAFT)
+                                                        </span>
+                                                    )}
+                                                    {prod.maintenance && (
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-bold border border-orange-500/40 flex items-center gap-1">
+                                                            🛠️ MAINTENANCE
                                                         </span>
                                                     )}
                                                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-bold border border-blue-500/30">
@@ -2877,6 +2888,56 @@ export default function AdminDashboardPage() {
                                                 <span className="text-xs text-gray-300 font-bold">Perlu Server / Zone ID</span>
                                             </label>
                                         </div>
+                                    </div>
+
+                                    <div className={`sm:col-span-2 space-y-2.5 p-3.5 rounded-xl border transition-all ${editingProduct.maintenance
+                                        ? 'bg-orange-500/10 border-orange-500/50'
+                                        : 'bg-[#060a1c] border-[#1a2a5a]'
+                                        }`}>
+                                        <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider">
+                                            Mode Maintenance
+                                        </label>
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={Boolean(editingProduct.maintenance)}
+                                            onClick={() => setEditingProduct({ ...editingProduct, maintenance: !editingProduct.maintenance })}
+                                            className={`w-full p-3 rounded-xl border text-left flex items-center gap-3 transition-all ${editingProduct.maintenance
+                                                ? 'bg-orange-500/15 border-orange-500 text-white'
+                                                : 'bg-[#0a1230]/60 border-[#1a2a5a] text-gray-400 hover:border-gray-600'
+                                                }`}
+                                        >
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-base ${editingProduct.maintenance ? 'bg-orange-500/20' : 'bg-gray-800 grayscale'}`}>
+                                                🛠️
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-xs font-bold flex items-center gap-1.5">
+                                                    <span>{editingProduct.maintenance ? 'Maintenance AKTIF' : 'Maintenance nonaktif'}</span>
+                                                    {editingProduct.maintenance && <Check className="w-3.5 h-3.5 text-orange-400" />}
+                                                </div>
+                                                <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
+                                                    Produk tetap tampil di katalog dengan label Maintenance, tapi tidak bisa dibeli (QRIS maupun saldo). Pesanan yang sudah dibayar tetap diproses.
+                                                </p>
+                                            </div>
+                                            <span className={`shrink-0 w-10 h-6 rounded-full p-0.5 transition-colors ${editingProduct.maintenance ? 'bg-orange-500' : 'bg-gray-700'}`}>
+                                                <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${editingProduct.maintenance ? 'translate-x-4' : 'translate-x-0'}`} />
+                                            </span>
+                                        </button>
+
+                                        {editingProduct.maintenance && (
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-300 mb-1">Pesan untuk Pembeli <span className="text-gray-500 font-normal">(opsional)</span></label>
+                                                <textarea
+                                                    rows={2}
+                                                    maxLength={300}
+                                                    value={editingProduct.maintenance_note || ''}
+                                                    onChange={(e) => setEditingProduct({ ...editingProduct, maintenance_note: e.target.value })}
+                                                    placeholder="Contoh: Sedang update versi game terbaru, estimasi selesai malam ini."
+                                                    className="w-full bg-[#060a1c] border border-[#1a2a5a] rounded-xl px-3.5 py-2 text-white text-xs focus:outline-none focus:border-orange-500"
+                                                />
+                                                <p className="text-[10px] text-gray-500 mt-1 text-right">{(editingProduct.maintenance_note || '').length}/300</p>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -3948,21 +4009,6 @@ export default function AdminDashboardPage() {
 
                         {/* Scrollable Modal Content */}
                         <div className="p-5 sm:p-6 overflow-y-auto modal-scrollable space-y-4 relative z-10 flex-1">
-                            {/* Floating Delay / Notice Info */}
-                            {(floatingModal.type === 'success' || floatingModal.dbStatus === 'updated' || floatingModal.dbStatus === 'synced') && (
-                                <div className="flex items-start gap-3 p-3.5 bg-gradient-to-r from-blue-950/70 to-indigo-950/70 border border-blue-500/40 rounded-2xl text-blue-200 text-xs shadow-lg">
-                                    <Clock className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5 animate-pulse" />
-                                    <div className="space-y-1">
-                                        <p className="font-bold text-white text-[11px] uppercase tracking-wide flex items-center gap-1.5">
-                                            <span>⏱️ Tampilan Akan Ter-Update ~1 Menit ke Depan</span>
-                                        </p>
-                                        <p className="text-[11px] text-blue-200/90 leading-relaxed">
-                                            Tampilan publik diperbarui otomatis dalam ±1–2 menit (cache CDN). Data di <strong>Supabase Cloud Database</strong> sudah langsung tersimpan saat ini juga!
-                                        </p>
-                                    </div>
-                                </div>
-                            )}
-
                             {/* Subtitle / Description */}
                             {floatingModal.subtitle && (
                                 <p className="text-xs text-gray-300 leading-relaxed bg-[#060a1c]/80 p-3.5 rounded-2xl border border-[#1a2a5a]">

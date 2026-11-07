@@ -1,5 +1,6 @@
 import './globals.css';
 import './kx.css';
+import './maintenance.css';
 import type { Metadata, Viewport } from 'next';
 import { NoRightClick } from '@/components/Turnstile';
 

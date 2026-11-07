@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAllOrders, getPendingOrders, updateOrder, deleteOrder, getOrder } from '@/lib/supabase';
+import { getAllOrdersLite, getPendingOrders, updateOrder, deleteOrder, getOrder } from '@/lib/supabase';
 import { orderLicenseKey } from '@/lib/thanhub';
 import { verifyAdminAuth } from '@/lib/security';
 import { checkPaymentStatus } from '@/lib/wijayapay';
@@ -15,7 +15,7 @@ export async function GET(req: Request) {
     }
 
     try {
-        const orders = await getAllOrders();
+        const orders = await getAllOrdersLite();
         return NextResponse.json({ success: true, data: orders });
     } catch (e: any) {
         return NextResponse.json({ success: false, message: e.message }, { status: 500 });
@@ -139,7 +139,7 @@ export async function POST(req: Request) {
                 }
             }
 
-            const updatedOrders = await getAllOrders();
+            const updatedOrders = await getAllOrdersLite();
             return NextResponse.json({
                 success: true,
                 message: `Pengecekan selesai! ${pendingOrders.length} pesanan pending diperiksa. ${newlyPaid} terdeteksi LUNAS, ${pendingOrders.length - newlyPaid} belum terdeteksi.`,

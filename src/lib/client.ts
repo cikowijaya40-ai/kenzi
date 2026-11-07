@@ -73,6 +73,8 @@ export interface CatItem { sku: string; name: string; price: number; original_pr
 export interface CatProduct {
     slug: string; name: string; category_slug: string; icon_url: string; banner_url: string; description: string; badge: string; publisher: string;
     input_label_1: string; input_placeholder_1: string; is_featured: boolean; items: CatItem[];
+    /** true = produk tampil tapi tidak bisa dibeli (mode maintenance dari admin) */
+    maintenance?: boolean; maintenance_note?: string;
 }
 export interface PubSettings {
     site_name: string; site_logo: string; announcement: string; announcement_active: boolean; whatsapp_cs: string;
@@ -102,10 +104,14 @@ export function useCatalog() {
             const raw = localStorage.getItem(CAT_KEY);
             if (raw) {
                 const c = JSON.parse(raw);
-                if (c?.d) { setData(c.d); setLoading(false); fresh = Date.now() - (c.t || 0) < 45_000; }
+                if (c?.d) {
+                    setData(c.d); setLoading(false);
+                    // Katalog di server/CDN sendiri di-cache 60 dtk: kalau salinan lokal masih lebih muda dari itu,
+                    // tidak ada gunanya request lagi (hemat Edge Request & Fast Data Transfer Vercel).
+                    fresh = typeof c.t === 'number' && Date.now() - c.t < 60_000;
+                }
             }
         } catch { }
-        // Data di perangkat masih segar → tidak perlu request sama sekali (hemat Edge Request & invocation)
         if (fresh) return () => { alive = false; };
         (async () => {
             const r: any = await fetchCatalog();

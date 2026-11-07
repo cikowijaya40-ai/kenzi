@@ -1,20 +1,16 @@
 -- =====================================================================
--- MIGRASI (OPSIONAL tapi disarankan): hemat storage & query Supabase gratisan
+-- MIGRASI: Optimasi usage Supabase gratisan (ukuran database)
 -- Jalankan SEKALI di Supabase -> SQL Editor. Aman dijalankan ulang.
 -- (Sudah otomatis ikut di supabase/schema.sql untuk instalasi baru.)
 --
--- 1) Index parsial untuk pesanan PENDING (dipakai "Cek Semua Pending" & cron harian).
--- 2) run_maintenance() (jalan 1x/hari lewat cron Vercel) sekarang juga:
---    - membuang pesanan/top up yang TIDAK PERNAH dibayar dan sudah > 45 hari,
---    - memangkas data QR/tutorial pembayaran pada pesanan lunas > 90 hari.
---    Pesanan LUNAS, saldo, dan mutasi tidak pernah dihapus.
+-- Memperbarui run_maintenance() yang dipanggil cron harian Vercel:
+--  * membuang data QR & teks tutorial pembayaran dari pesanan/top-up yang sudah tidak PENDING
+--  * menghapus pesanan/top-up EXPIRED yang tidak pernah dibayar > 30 hari
 -- =====================================================================
-create index if not exists orders_pending_idx on orders (created_at desc) where status = 'PENDING';
-
 create or replace function run_maintenance()
 returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare a int; b int; c int; d int; e int; f int; g int; h int;
+declare a int; b int; c int; d int; e int; f int; g int; h int; i int;
 begin
   update topups set status = 'EXPIRED' where status = 'PENDING' and created_at < now() - interval '2 hours';
   get diagnostics a = row_count;
@@ -31,18 +27,33 @@ begin
      and not exists (select 1 from orders o where o.user_id = u.id and o.status in ('PAID'))
      and not exists (select 1 from topups t where t.user_id = u.id and t.status = 'PAID');
   get diagnostics e = row_count;
-  -- HEMAT STORAGE (batas gratis 500MB): buang tagihan yang TIDAK PERNAH dibayar & sudah > 45 hari
-  delete from orders where status in ('EXPIRED','CANCELLED') and created_at < now() - interval '45 days';
+
+  -- HEMAT UKURAN DATABASE (kuota gratis 500 MB): data QR & teks tutorial pembayaran hanya dipakai selama
+  -- tagihan masih PENDING. Setelah itu (lunas / kedaluwarsa, > 1 hari) dibuang; data penting
+  -- (gateway_provider, ref_id, nomor VA, dll.) tetap ada.
+  update orders set payment_data = payment_data - 'qr_string' - 'qr_image' - 'tutorial_pembayaran'
+   where status <> 'PENDING' and created_at < now() - interval '1 day'
+     and (payment_data ? 'qr_string' or payment_data ? 'qr_image' or payment_data ? 'tutorial_pembayaran');
   get diagnostics f = row_count;
-  delete from topups where status in ('EXPIRED','FAILED','CANCELLED') and created_at < now() - interval '45 days';
+  update topups set payment_data = payment_data - 'qr_string' - 'qr_image' - 'tutorial_pembayaran'
+   where status <> 'PENDING' and created_at < now() - interval '1 day'
+     and (payment_data ? 'qr_string' or payment_data ? 'qr_image' or payment_data ? 'tutorial_pembayaran');
   get diagnostics g = row_count;
-  -- Pesanan lunas > 90 hari: data QR/tutorial pembayaran tidak dipakai lagi (yang disimpan hanya nama gateway)
-  update orders set payment_data = jsonb_build_object('gateway_provider', payment_data->'gateway_provider')
-   where status = 'PAID' and created_at < now() - interval '90 days'
-     and payment_data is not null and payment_data <> '{}'::jsonb
-     and (select count(*) from jsonb_object_keys(payment_data)) > 1;
+
+  -- Tagihan yang kedaluwarsa dan tidak pernah dibayar > 30 hari tidak berguna lagi
+  delete from orders where status = 'EXPIRED' and created_at < now() - interval '30 days';
   get diagnostics h = row_count;
+  delete from topups where status = 'EXPIRED' and created_at < now() - interval '30 days';
+  get diagnostics i = row_count;
+
   return jsonb_build_object('topups_expired', a, 'rate_limits_purged', b, 'reset_purged', c,
                             'orders_expired', d, 'guest_users_purged', e,
-                            'old_unpaid_orders_purged', f, 'old_unpaid_topups_purged', g, 'old_payment_data_trimmed', h);
+                            'orders_trimmed', f, 'topups_trimmed', g,
+                            'orders_purged', h, 'topups_purged', i);
 end $$;
+
+revoke all on function run_maintenance() from public, anon, authenticated;
+
+-- Webhook top-up mencari baris lewat payment_data->>'ref_id' (wallet.ts). Tanpa index ini setiap webhook
+-- memindai seluruh tabel topups; dengan index jadi pencarian langsung.
+create index if not exists topups_ref_idx on topups ((payment_data->>'ref_id'));

@@ -5,7 +5,6 @@ import { getSupabaseAdmin } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 
 const BUCKET_NAME = 'store-assets';
-const MAX_DATA_URL_BYTES = 150 * 1024;
 
 export async function POST(req: Request) {
     const isAuth = await verifyAdminAuth(req);
@@ -79,15 +78,16 @@ export async function POST(req: Request) {
         const client = getSupabaseAdmin();
         if (client) {
             try {
-                // Nama file unik (timestamp) → aman di-cache 1 tahun: hemat bandwidth (egress) Supabase.
+                // Nama file unik (timestamp) → aman di-cache 1 tahun di browser/CDN: hemat egress Storage Supabase
                 const doUpload = () => client.storage.from(BUCKET_NAME).upload(fileName, fileBuffer!, {
                     contentType: mimeType,
-                    upsert: false,
+                    upsert: true,
                     cacheControl: '31536000',
                 });
                 let { data: uploadData, error: uploadErr } = await doUpload();
-                // Bucket dibuat hanya bila memang belum ada (bukan cek listBuckets di setiap upload)
-                if (uploadErr && /bucket.*not.*found|not found/i.test(uploadErr.message || '')) {
+
+                // Bucket dibuat HANYA bila belum ada (sebelumnya listBuckets() dipanggil di setiap upload)
+                if (uploadErr && /bucket.*not found|not found.*bucket/i.test(String((uploadErr as any).message || ''))) {
                     await client.storage.createBucket(BUCKET_NAME, { public: true, fileSizeLimit: 10485760 });
                     ({ data: uploadData, error: uploadErr } = await doUpload());
                 }
@@ -110,15 +110,14 @@ export async function POST(req: Request) {
             }
         }
 
-        // Data URL disimpan di database & ikut terkirim ke SETIAP pengunjung → hanya boleh untuk gambar kecil.
-        if (fileBuffer.length > MAX_DATA_URL_BYTES) {
+        // Fallback Data URL hanya untuk gambar kecil. Data URL disimpan di database lalu ikut terkirim di SETIAP
+        // respons katalog → gambar besar akan menguras bandwidth Vercel & egress Supabase.
+        if (fileBuffer.length > 150 * 1024) {
             return NextResponse.json({
                 success: false,
-                message: 'Storage Supabase belum siap, dan gambar terlalu besar untuk disimpan sebagai Data URL (maks 150KB). Cek bucket "store-assets" / SUPABASE_SERVICE_ROLE_KEY, atau kecilkan gambar.',
-            }, { status: 503 });
+                message: 'Upload ke Supabase Storage gagal, dan gambar ini terlalu besar (>150KB) untuk disimpan langsung di database. Cek bucket "store-assets" (public) & SUPABASE_SERVICE_ROLE_KEY, atau kecilkan gambar / tempel URL gambar.',
+            }, { status: 502 });
         }
-
-        // Fallback: If Supabase Storage is not ready, return base64 Data URL so user is never blocked
         const fallbackDataUrl = `data:${mimeType};base64,${fileBuffer.toString('base64')}`;
         return NextResponse.json({
             success: true,

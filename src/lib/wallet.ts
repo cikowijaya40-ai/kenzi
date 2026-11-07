@@ -100,12 +100,26 @@ export async function adminAdjust(userId: string, delta: number, note: string, a
     return Number(data);
 }
 
+
+export function maintenanceMessage(name?: string | null, note?: string | null): string {
+    const n = String(note || '').trim();
+    return n
+        ? `${name || 'Produk ini'} sedang maintenance. ${n}`
+        : `${name || 'Produk ini'} sedang maintenance, belum bisa dibeli sementara. Coba lagi nanti ya.`;
+}
+
 /* ───────── BELI PAKAI SALDO ───────── */
 export async function buyWithBalance(user: AppUser, input: { productSlug: string; itemSku: string; gameId?: string; zoneId?: string; whatsapp?: string }) {
     const db = requireDb();
     const stamp = Date.now().toString().slice(-8);
     const invoiceNo = `INV-${stamp}-${rid()}`;
     const refId = `ORD-${stamp}${rid()}`;
+
+    // 0a) Produk sedang maintenance → tolak sebelum saldo disentuh
+    const { data: prodRow } = await db.from('products').select('*').eq('slug', input.productSlug).maybeSingle();
+    if (prodRow && prodRow.maintenance === true) {
+        return { success: false as const, code: 'MAINTENANCE', message: maintenanceMessage(prodRow.name, prodRow.maintenance_note) };
+    }
 
     // 0) Stok & harga LIVE di Thanhub (gagal membaca = lolos)
     const { data: pre } = await db.from('product_items').select('sku, price').eq('product_slug', input.productSlug).eq('sku', input.itemSku).maybeSingle();

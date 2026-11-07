@@ -38,8 +38,14 @@ export interface Product {
     has_zone_id: boolean;
     is_active: boolean;
     is_featured: boolean;
+    /** Mode maintenance: produk tetap tampil di katalog, tapi tidak bisa dibeli. */
+    maintenance?: boolean;
+    /** Pesan opsional yang ditampilkan ke pembeli saat maintenance. */
+    maintenance_note?: string | null;
     sort_order: number;
     items?: ProductItem[];
+    /** Hanya dipakai server -> admin UI (tidak disimpan ke database). */
+    _warning?: string;
 }
 
 export interface PaymentMethod {

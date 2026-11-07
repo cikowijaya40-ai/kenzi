@@ -54,6 +54,7 @@ export default function BuySheet({ product: p, onClose }: Props) {
     const bodyRef = useRef<HTMLDivElement>(null);
     const downOnOverlay = useRef(false);
 
+    const maint = !!p.maintenance;
     const item = p.items.find((i) => i.sku === sku);
     const price = item?.price || 0;
     const canUseBalance = !!user && !!item && user.balance >= price;
@@ -88,12 +89,13 @@ export default function BuySheet({ product: p, onClose }: Props) {
     useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }); }, [step]);
 
     function pick(it: CatItem) {
-        if (!it.in_stock) return;
+        if (!it.in_stock || maint) return;
         setSku(it.sku); setErr(''); setStep(2);
     }
 
     /** Bayar langsung via QRIS — tidak perlu login. Akun dibuat otomatis dari email untuk pembeli baru. */
     async function pay() {
+        if (maint) return setErr('Produk ini sedang maintenance.');
         if (!item) { setStep(1); return; }
         if (needId && !gameId.trim()) return setErr(`${p.input_label_1 || 'ID'} wajib diisi.`);
         if (!user && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim())) return setErr('Isi email yang valid untuk menerima lisensi & akunmu.');
@@ -115,6 +117,7 @@ export default function BuySheet({ product: p, onClose }: Props) {
     }
 
     async function buy() {
+        if (maint) return setErr('Produk ini sedang maintenance.');
         if (!item) { setStep(1); return; }
         if (needId && !gameId.trim()) return setErr(`${p.input_label_1 || 'ID'} wajib diisi.`);
         setBusy(true); setErr('');
@@ -167,9 +170,18 @@ export default function BuySheet({ product: p, onClose }: Props) {
                     {/* ── LANGKAH 1: pilih durasi (sekali klik langsung lanjut) ── */}
                     {step === 1 && (
                         <div className="ks-dur-list">
+                            {maint && (
+                                <div className="ks-maint" role="status">
+                                    <i className="fa-solid fa-screwdriver-wrench" />
+                                    <div>
+                                        <b>Produk sedang maintenance</b>
+                                        {p.maintenance_note || 'Pembelian dinonaktifkan sementara. Silakan cek lagi nanti.'}
+                                    </div>
+                                </div>
+                            )}
                             {p.items.map((it) => {
                                 const dur = durationOf(it.name);
-                                const off = !it.in_stock;
+                                const off = !it.in_stock || maint;
                                 return (
                                     <button key={it.sku} type="button" className={`ks-dur ${sku === it.sku ? 'on' : ''}`} disabled={off} onClick={() => pick(it)}>
                                         <span className="ks-dur-ic"><i className="fa-regular fa-clock" /></span>
@@ -177,7 +189,7 @@ export default function BuySheet({ product: p, onClose }: Props) {
                                             <b>{dur || it.name}</b>
                                             <span className="ks-dur-sub">
                                                 {dur && <span>Masa aktif {dur.toLowerCase()}</span>}
-                                                <em className={off ? 'out' : ''}>{stockChip(it)}</em>
+                                                <em className={maint ? 'maint' : off ? 'out' : ''}>{maint ? 'Maintenance' : stockChip(it)}</em>
                                             </span>
                                         </span>
                                         <span className="ks-dur-price">

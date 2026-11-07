@@ -16,6 +16,7 @@ export default function ProductBuy({ slug }: { slug: string }) {
     if (!p) {
         return <div className="kx-wrap"><div className="kx-empty">{loading ? 'Memuat produk...' : 'Produk tidak ditemukan.'}</div></div>;
     }
+    const maint = !!p.maintenance;
     const soldOut = p.items.length > 0 && p.items.every((i) => !i.in_stock);
 
     return (
@@ -28,8 +29,20 @@ export default function ProductBuy({ slug }: { slug: string }) {
                 </div>
             </div>
 
-            <button type="button" className="ks-pay ks-open" disabled={soldOut} onClick={() => setOpen(true)}>
-                <i className="fa-solid fa-cart-shopping" /> {soldOut ? 'Stok habis' : 'Pilih durasi & beli'}
+            {maint && (
+                <div className="kx-maint-banner" role="status">
+                    <i className="fa-solid fa-screwdriver-wrench" />
+                    <div>
+                        <b>Produk sedang maintenance</b>
+                        {p.maintenance_note || 'Pembelian dinonaktifkan sementara. Silakan cek lagi nanti.'}
+                    </div>
+                </div>
+            )}
+
+            <button type="button" className="ks-pay ks-open" disabled={soldOut || maint} onClick={() => setOpen(true)}>
+                {maint
+                    ? <><i className="fa-solid fa-screwdriver-wrench" /> Sedang maintenance</>
+                    : <><i className="fa-solid fa-cart-shopping" /> {soldOut ? 'Stok habis' : 'Pilih durasi & beli'}</>}
             </button>
 
             <div className="sub-title">Deskripsi Produk</div>
@@ -45,7 +58,7 @@ export default function ProductBuy({ slug }: { slug: string }) {
                 </ol>
             </div>
 
-            {open && <BuySheet product={p} onClose={() => setOpen(false)} />}
+            {open && !maint && <BuySheet product={p} onClose={() => setOpen(false)} />}
         </div>
     );
 }
