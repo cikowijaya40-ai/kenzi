@@ -75,6 +75,12 @@ export interface CatProduct {
     input_label_1: string; input_placeholder_1: string; is_featured: boolean; items: CatItem[];
     /** true = produk tampil tapi tidak bisa dibeli (mode maintenance dari admin) */
     maintenance?: boolean; maintenance_note?: string;
+    /** disematkan admin → selalu di atas */
+    pinned?: boolean;
+    /** total terjual (penjualan asli + tambahan admin); null = disembunyikan / belum ada */
+    sold?: number | null;
+    /** label "Terlaris" */
+    bestseller?: boolean;
 }
 export interface PubSettings {
     site_name: string; site_logo: string; announcement: string; announcement_active: boolean; whatsapp_cs: string;
@@ -126,6 +132,13 @@ export function useCatalog() {
         return () => { alive = false; };
     }, []);
     return { data, loading };
+}
+
+/** 87 → "87", 1250 → "1,2rb+", 12000 → "12rb+" */
+export function fmtSold(n: number): string {
+    if (n < 1000) return String(n);
+    const k = Math.floor(n / 100) / 10; // 1 desimal, dibulatkan ke bawah
+    return `${String(k).replace('.', ',').replace(/,0$/, '')}rb+`;
 }
 
 export const fixImg = (u?: string) => (!u ? '' : u.startsWith('http') || u.startsWith('/') || u.startsWith('data:') ? u : '/' + u);

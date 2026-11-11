@@ -8,23 +8,52 @@ const globalForProducts = globalThis as unknown as {
 };
 
 /**
- * Kolom maintenance (products.maintenance / maintenance_note) ditambahkan lewat migrasi SQL.
+ * Kolom fitur baru di tabel products — ditambahkan lewat migrasi SQL:
+ *   maintenance, maintenance_note  → supabase/migrations/2026-11-product-maintenance.sql
+ *   pinned, sold_offset, show_sold, bestseller_mode → supabase/migrations/2026-11-product-pin-sold.sql
  * Kalau migrasi belum dijalankan, query yang menyertakan kolom itu ditolak Supabase. Helper di bawah
- * mendeteksi kasus itu supaya simpan produk biasa TETAP berhasil (tanpa mode maintenance).
+ * mendeteksi kasus itu supaya simpan produk biasa TETAP berhasil (tanpa fitur barunya).
  */
-export const MAINTENANCE_MIGRATION_WARNING =
-    'Kolom maintenance belum ada di database. Jalankan file supabase/migrations/2026-11-product-maintenance.sql di Supabase SQL Editor, lalu simpan lagi. Perubahan lain sudah tersimpan.';
+const OPTIONAL_COLS = ['maintenance', 'maintenance_note', 'pinned', 'sold_offset', 'show_sold', 'bestseller_mode'] as const;
+const OPTIONAL_DEFAULTS: Record<(typeof OPTIONAL_COLS)[number], unknown> = {
+    maintenance: false, maintenance_note: null, pinned: false, sold_offset: 0, show_sold: true, bestseller_mode: 'auto',
+};
 
-function isMissingMaintenanceColumn(err: any): boolean {
+export const NEW_COLUMNS_WARNING =
+    'Kolom fitur baru (maintenance / pin / terjual) belum ada di database. Jalankan file di supabase/migrations/ (2026-11-product-maintenance.sql dan 2026-11-product-pin-sold.sql) di Supabase SQL Editor, lalu simpan lagi. Perubahan lain sudah tersimpan.';
+
+function isMissingOptionalColumn(err: any): boolean {
     if (!err) return false;
     const msg = `${err.message || ''} ${err.details || ''} ${err.hint || ''}`.toLowerCase();
-    if (!msg.includes('maintenance')) return false;
+    if (!OPTIONAL_COLS.some((c) => msg.includes(c))) return false;
     return err.code === 'PGRST204' || err.code === '42703' || msg.includes('column') || msg.includes('schema cache');
 }
 
-function withoutMaintenance<T extends Record<string, any>>(payload: T): Omit<T, 'maintenance' | 'maintenance_note'> {
-    const { maintenance, maintenance_note, ...rest } = payload as any;
-    return rest;
+function withoutOptionalCols<T extends Record<string, any>>(payload: T): Record<string, any> {
+    const out: Record<string, any> = { ...payload };
+    for (const c of OPTIONAL_COLS) delete out[c];
+    return out;
+}
+
+const optVal = (obj: any, k: (typeof OPTIONAL_COLS)[number]) => {
+    const v = obj?.[k];
+    return String(v === undefined || v === null || v === '' ? OPTIONAL_DEFAULTS[k] : v);
+};
+/** true bila ada kolom fitur baru yang nilainya BUKAN bawaan (artinya perlu kolomnya ada di DB). */
+const hasNonDefaultOptional = (obj: any) => OPTIONAL_COLS.some((k) => optVal(obj, k) !== String(OPTIONAL_DEFAULTS[k]));
+/** true bila ada kolom fitur baru yang berubah dibanding produk sebelumnya. */
+const changedOptional = (next: any, prev: any) => OPTIONAL_COLS.some((k) => k in next && optVal(next, k) !== optVal(prev, k));
+
+/** Rapikan input fitur baru dari form admin (tipe & batas aman). Hanya field yang dikirim yang diproses. */
+function normalizeOptional(src: Record<string, any>): Record<string, any> {
+    const out: Record<string, any> = {};
+    if (src.maintenance !== undefined) out.maintenance = Boolean(src.maintenance);
+    if (src.maintenance_note !== undefined) out.maintenance_note = src.maintenance_note ? String(src.maintenance_note).trim().slice(0, 300) || null : null;
+    if (src.pinned !== undefined) out.pinned = Boolean(src.pinned);
+    if (src.show_sold !== undefined) out.show_sold = Boolean(src.show_sold);
+    if (src.sold_offset !== undefined) out.sold_offset = Math.max(0, Math.min(1_000_000, Math.floor(Number(src.sold_offset)) || 0));
+    if (src.bestseller_mode !== undefined) out.bestseller_mode = ['auto', 'on', 'off'].includes(src.bestseller_mode) ? src.bestseller_mode : 'auto';
+    return out;
 }
 
 /**
@@ -77,7 +106,9 @@ async function loadAllProducts(includeInactive: boolean = false): Promise<Produc
                     };
                 });
 
-                globalForProducts.cachedProducts = fullProducts; bust('products:');
+                // Catatan: JANGAN bust('products:') di sini. Loader ini berjalan di dalam memo(); bust akan menghapus cache
+                // key LAIN (publik <-> admin) sehingga keduanya saling memaksa query ulang ke Supabase.
+                globalForProducts.cachedProducts = fullProducts;
                 return fullProducts;
             }
         } catch (e) {
@@ -172,8 +203,13 @@ export async function createProduct(newProdData: Partial<Product>): Promise<Prod
         has_zone_id: Boolean(newProdData.has_zone_id),
         is_active: newProdData.is_active !== undefined ? newProdData.is_active : true,
         is_featured: newProdData.is_featured !== undefined ? newProdData.is_featured : true,
-        maintenance: Boolean(newProdData.maintenance),
-        maintenance_note: newProdData.maintenance_note ? String(newProdData.maintenance_note).trim().slice(0, 300) : null,
+        maintenance: false,
+        maintenance_note: null,
+        pinned: false,
+        sold_offset: 0,
+        show_sold: true,
+        bestseller_mode: 'auto',
+        ...normalizeOptional(newProdData),
         sort_order: newProdData.sort_order || all.length + 1,
         items: newProdData.items || [],
     };
@@ -182,16 +218,15 @@ export async function createProduct(newProdData: Partial<Product>): Promise<Prod
     const client = getSupabaseAdmin() || getSupabase();
     if (client) {
         try {
-            const { items, id, _warning, ...fullPayload } = newProduct;
-            // Produk baru yang tidak maintenance tidak perlu mengirim kolom maintenance sama sekali
-            const prodPayload: Record<string, any> = newProduct.maintenance ? fullPayload : withoutMaintenance(fullPayload);
+            const { items, id, _warning, sold_real, ...fullPayload } = newProduct as Product & { sold_real?: number };
+            // Produk baru yang semua fitur barunya masih bawaan tidak perlu mengirim kolom-kolom itu sama sekali
+            const prodPayload: Record<string, any> = hasNonDefaultOptional(newProduct) ? fullPayload : withoutOptionalCols(fullPayload);
             let { data, error } = await client.from('products').insert([prodPayload]).select();
-            if (error && isMissingMaintenanceColumn(error)) {
-                ({ data, error } = await client.from('products').insert([withoutMaintenance(prodPayload)]).select());
-                if (newProduct.maintenance) {
-                    newProduct.maintenance = false;
-                    newProduct.maintenance_note = null;
-                    newProduct._warning = MAINTENANCE_MIGRATION_WARNING;
+            if (error && isMissingOptionalColumn(error)) {
+                ({ data, error } = await client.from('products').insert([withoutOptionalCols(prodPayload)]).select());
+                if (hasNonDefaultOptional(newProduct)) {
+                    Object.assign(newProduct, OPTIONAL_DEFAULTS);
+                    newProduct._warning = NEW_COLUMNS_WARNING;
                 }
             }
             if (!error && data && data[0]) {
@@ -231,13 +266,10 @@ export async function updateProduct(slug: string, updates: Partial<Product>): Pr
 
     const existing = all[index];
 
-    // Rapikan input maintenance dari form admin
-    const cleanUpdates: Partial<Product> = { ...updates };
+    // Rapikan input dari form admin; field transien (hanya untuk tampilan) tidak boleh ikut disimpan
+    const cleanUpdates: Partial<Product> = { ...updates, ...normalizeOptional(updates) };
     delete cleanUpdates._warning;
-    if (cleanUpdates.maintenance !== undefined) cleanUpdates.maintenance = Boolean(cleanUpdates.maintenance);
-    if (cleanUpdates.maintenance_note !== undefined) {
-        cleanUpdates.maintenance_note = cleanUpdates.maintenance_note ? String(cleanUpdates.maintenance_note).trim().slice(0, 300) || null : null;
-    }
+    delete cleanUpdates.sold_real;
 
     const updated: Product = {
         ...existing,
@@ -250,16 +282,13 @@ export async function updateProduct(slug: string, updates: Partial<Product>): Pr
     const client = getSupabaseAdmin() || getSupabase();
     if (client) {
         try {
-            const { items, id, _warning, ...prodPayload } = updated;
+            const { items, id, _warning, sold_real, ...prodPayload } = updated as Product & { sold_real?: number };
             let { error: updErr } = await client.from('products').update(prodPayload).eq('slug', slug);
-            if (updErr && isMissingMaintenanceColumn(updErr)) {
-                // Migrasi belum dijalankan: simpan semua field lain, abaikan kolom maintenance
-                ({ error: updErr } = await client.from('products').update(withoutMaintenance(prodPayload)).eq('slug', slug));
-                if (Boolean(cleanUpdates.maintenance) !== Boolean(existing.maintenance)) {
-                    updated._warning = MAINTENANCE_MIGRATION_WARNING;
-                }
-                updated.maintenance = Boolean(existing.maintenance);
-                updated.maintenance_note = existing.maintenance_note ?? null;
+            if (updErr && isMissingOptionalColumn(updErr)) {
+                // Migrasi belum dijalankan: simpan semua field lain, abaikan kolom fitur baru
+                ({ error: updErr } = await client.from('products').update(withoutOptionalCols(prodPayload)).eq('slug', slug));
+                if (changedOptional(cleanUpdates, existing)) updated._warning = NEW_COLUMNS_WARNING;
+                for (const k of OPTIONAL_COLS) (updated as any)[k] = (existing as any)[k];
             }
             if (updErr) console.warn('Gagal update product di Supabase:', updErr);
 
@@ -289,6 +318,27 @@ export async function updateProduct(slug: string, updates: Partial<Product>): Pr
     globalForProducts.cachedProducts = all; bust('products:');
 
     return updateWarning ? { ...storedUpdated, _warning: updateWarning } : storedUpdated;
+}
+
+/**
+ * Jumlah penjualan asli per produk (pesanan lunas). Dihitung di database lewat RPC product_sales_counts()
+ * (1 query agregat) dan di-cache 5 menit per instance supaya tidak membebani Supabase gratisan.
+ * Bila migrasi belum dijalankan / RPC error → kosong (fitur "terjual" tersembunyi, toko tetap jalan).
+ */
+export async function getProductSales(): Promise<Record<string, number>> {
+    return memo('sales:main', 300_000, async () => {
+        const client = getSupabaseAdmin() || getSupabase();
+        if (!client) return {};
+        try {
+            const { data, error } = await client.rpc('product_sales_counts');
+            if (error || !Array.isArray(data)) return {};
+            const out: Record<string, number> = {};
+            for (const r of data as any[]) out[String(r.product_slug)] = Number(r.sold) || 0;
+            return out;
+        } catch {
+            return {};
+        }
+    });
 }
 
 /**

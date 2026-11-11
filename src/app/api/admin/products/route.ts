@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAllProducts, createProduct, updateProduct, deleteProduct } from '@/lib/products';
+import { getAllProducts, getProductSales, createProduct, updateProduct, deleteProduct } from '@/lib/products';
 import { verifyAdminAuth } from '@/lib/security';
 
 export const dynamic = 'force-dynamic';
@@ -11,8 +11,9 @@ export async function GET(req: Request) {
     }
 
     try {
-        const prods = await getAllProducts(true);
-        return NextResponse.json({ success: true, data: prods });
+        const [prods, sales] = await Promise.all([getAllProducts(true), getProductSales()]);
+        // sold_real = penjualan asli (pesanan lunas), hanya untuk tampilan admin; tidak disimpan
+        return NextResponse.json({ success: true, data: prods.map((p) => ({ ...p, sold_real: sales[p.slug] || 0 })) });
     } catch (e: any) {
         return NextResponse.json({ success: false, message: e.message }, { status: 500 });
     }

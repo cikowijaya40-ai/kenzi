@@ -141,6 +141,7 @@ export default function AdminDashboardPage() {
     const [productFilter, setProductFilter] = useState<'all' | 'public' | 'private'>('all');
     const [productSearch, setProductSearch] = useState('');
     const [visibilityTogglingSlug, setVisibilityTogglingSlug] = useState<string | null>(null);
+    const [pinTogglingSlug, setPinTogglingSlug] = useState<string | null>(null);
 
     // Filter & Search Orders
     const [orderSearch, setOrderSearch] = useState('');
@@ -423,6 +424,10 @@ export default function AdminDashboardPage() {
             is_featured: true,
             maintenance: false,
             maintenance_note: '',
+            pinned: false,
+            sold_offset: 0,
+            show_sold: true,
+            bestseller_mode: 'auto',
             sort_order: products.length + 1,
             items: [],
         });
@@ -463,6 +468,7 @@ export default function AdminDashboardPage() {
                         { label: 'Slug Produk', value: editingProduct.slug || '-' },
                         { label: 'Publisher / Dev', value: editingProduct.publisher || '-' },
                         { label: 'Status Produk', value: editingProduct.is_active ? 'Aktif (Dijual)' : 'Nonaktif (Draft)' },
+                        { label: 'Posisi', value: editingProduct.pinned ? '📌 Disematkan di paling atas' : 'Normal' },
                         { label: 'Mode Maintenance', value: data.warning ? '⚠ Belum tersimpan (jalankan migrasi SQL)' : editingProduct.maintenance ? '🛠️ ON (tidak bisa dibeli)' : 'OFF (normal)' },
                         ...(data.warning ? [{ label: 'Peringatan', value: data.warning }] : []),
                         { label: 'Status Database', value: '✓ Berhasil Disimpan ke Supabase' },
@@ -544,6 +550,33 @@ export default function AdminDashboardPage() {
             );
         } finally {
             setVisibilityTogglingSlug(null);
+        }
+    };
+
+    // Pin / lepas pin produk dari kartu (tanpa membuka form edit)
+    const handleTogglePin = async (prod: Product) => {
+        const newPinned = !prod.pinned;
+        setPinTogglingSlug(prod.slug);
+        setProducts((prev) => prev.map((p) => (p.slug === prod.slug ? { ...p, pinned: newPinned } : p)));
+        const rollback = () => setProducts((prev) => prev.map((p) => (p.slug === prod.slug ? { ...p, pinned: !newPinned } : p)));
+        try {
+            const res = await fetch('/api/admin/products', {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ isEdit: true, slug: prod.slug, pinned: newPinned }),
+            });
+            const data = await res.json();
+            if (data.success && !data.warning) {
+                showToast('success', newPinned ? `"${prod.name}" disematkan di paling atas katalog` : `Pin "${prod.name}" dilepas`);
+            } else {
+                rollback();
+                showToast('error', data.warning || data.message || 'Gagal mengubah pin produk');
+            }
+        } catch (e: any) {
+            rollback();
+            showToast('error', e.message);
+        } finally {
+            setPinTogglingSlug(null);
         }
     };
 
@@ -2093,6 +2126,16 @@ export default function AdminDashboardPage() {
                                                             🛠️ MAINTENANCE
                                                         </span>
                                                     )}
+                                                    {prod.pinned && (
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 flex items-center gap-1">
+                                                            📌 PIN
+                                                        </span>
+                                                    )}
+                                                    {prod.bestseller_mode === 'on' && (
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-bold border border-orange-500/40 flex items-center gap-1">
+                                                            🔥 TERLARIS
+                                                        </span>
+                                                    )}
                                                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-bold border border-blue-500/30">
                                                         {prod.badge || 'PROMO'}
                                                     </span>
@@ -2105,6 +2148,9 @@ export default function AdminDashboardPage() {
                                         <div className="pt-3 border-t border-[#1a2a5a] flex items-center justify-between flex-wrap gap-2 text-xs">
                                             <div className="text-gray-400">
                                                 <span className="font-bold text-white">{prod.items?.length || 0}</span> Item Nominal
+                                                <span className="mx-1.5 text-gray-600">•</span>
+                                                Terjual <span className="font-bold text-white">{(prod.sold_real || 0) + (prod.sold_offset || 0)}</span>
+                                                {prod.show_sold === false && <span className="text-gray-500"> (disembunyikan)</span>}
                                             </div>
 
                                             <div className="flex items-center gap-2 flex-wrap">
@@ -2126,6 +2172,19 @@ export default function AdminDashboardPage() {
                                                         <Eye className="w-3.5 h-3.5" />
                                                     )}
                                                     <span>{prod.is_active ? 'Jadikan Private' : 'Tampilkan Publik'}</span>
+                                                </button>
+
+                                                <button
+                                                    onClick={() => handleTogglePin(prod)}
+                                                    disabled={pinTogglingSlug === prod.slug}
+                                                    className={`px-2.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5 transition-all text-xs border ${prod.pinned
+                                                        ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/40'
+                                                        : 'bg-[#0a1230]/60 hover:bg-[#0f1a40] text-gray-300 border-[#1a2a5a]'
+                                                        } disabled:opacity-50`}
+                                                    title={prod.pinned ? 'Lepas pin: produk kembali ke urutan biasa' : 'Pin produk ke paling atas di katalog'}
+                                                >
+                                                    {pinTogglingSlug === prod.slug ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <span>📌</span>}
+                                                    <span>{prod.pinned ? 'Lepas Pin' : 'Pin ke Atas'}</span>
                                                 </button>
 
                                                 <button
@@ -2887,6 +2946,96 @@ export default function AdminDashboardPage() {
                                                 />
                                                 <span className="text-xs text-gray-300 font-bold">Perlu Server / Zone ID</span>
                                             </label>
+                                        </div>
+                                    </div>
+
+                                    <div className="sm:col-span-2 space-y-3 p-3.5 rounded-xl bg-[#060a1c] border border-[#1a2a5a]">
+                                        <label className="block text-xs font-bold text-gray-300 uppercase tracking-wider">
+                                            Posisi &amp; Penjualan
+                                        </label>
+
+                                        {/* Pin ke atas */}
+                                        <button
+                                            type="button"
+                                            role="switch"
+                                            aria-checked={Boolean(editingProduct.pinned)}
+                                            onClick={() => setEditingProduct({ ...editingProduct, pinned: !editingProduct.pinned })}
+                                            className={`w-full p-3 rounded-xl border text-left flex items-center gap-3 transition-all ${editingProduct.pinned
+                                                ? 'bg-amber-500/10 border-amber-500 text-white'
+                                                : 'bg-[#0a1230]/60 border-[#1a2a5a] text-gray-400 hover:border-gray-600'
+                                                }`}
+                                        >
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-base ${editingProduct.pinned ? 'bg-amber-500/20' : 'bg-gray-800 grayscale'}`}>📌</div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-xs font-bold flex items-center gap-1.5">
+                                                    <span>{editingProduct.pinned ? 'Disematkan di paling atas' : 'Pin produk ke atas'}</span>
+                                                    {editingProduct.pinned && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                                                </div>
+                                                <p className="text-[11px] text-gray-400 mt-0.5 leading-snug">
+                                                    Produk yang di-pin selalu tampil paling atas di katalog (termasuk beranda). Kalau ada beberapa, urutannya mengikuti urutan produk.
+                                                </p>
+                                            </div>
+                                            <span className={`shrink-0 w-10 h-6 rounded-full p-0.5 transition-colors ${editingProduct.pinned ? 'bg-amber-500' : 'bg-gray-700'}`}>
+                                                <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${editingProduct.pinned ? 'translate-x-4' : 'translate-x-0'}`} />
+                                            </span>
+                                        </button>
+
+                                        {/* Label Terlaris */}
+                                        <div>
+                                            <p className="text-xs font-bold text-gray-300 mb-1.5">🔥 Label &quot;Terlaris&quot;</p>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {([['auto', 'Otomatis'], ['on', 'Selalu tampil'], ['off', 'Sembunyikan']] as const).map(([val, label]) => {
+                                                    const active = (editingProduct.bestseller_mode || 'auto') === val;
+                                                    return (
+                                                        <button
+                                                            key={val}
+                                                            type="button"
+                                                            onClick={() => setEditingProduct({ ...editingProduct, bestseller_mode: val })}
+                                                            className={`px-2 py-2 rounded-xl border text-[11px] font-bold transition-all ${active
+                                                                ? 'bg-orange-500/15 border-orange-500 text-orange-200'
+                                                                : 'bg-[#0a1230]/60 border-[#1a2a5a] text-gray-400 hover:border-gray-600'
+                                                                }`}
+                                                        >
+                                                            {label}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            <p className="text-[10px] text-gray-500 mt-1 leading-snug">Otomatis = 3 produk dengan total terjual terbanyak otomatis dapat label Terlaris.</p>
+                                        </div>
+
+                                        {/* Jumlah terjual */}
+                                        <div className="space-y-2">
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={editingProduct.show_sold !== false}
+                                                onClick={() => setEditingProduct({ ...editingProduct, show_sold: editingProduct.show_sold === false })}
+                                                className={`w-full p-2.5 rounded-xl border text-left flex items-center gap-3 transition-all ${editingProduct.show_sold !== false
+                                                    ? 'bg-blue-500/10 border-blue-500/60 text-white'
+                                                    : 'bg-[#0a1230]/60 border-[#1a2a5a] text-gray-400 hover:border-gray-600'
+                                                    }`}
+                                            >
+                                                <span className="flex-1 text-xs font-bold">Tampilkan jumlah &quot;Terjual&quot; di kartu produk</span>
+                                                <span className={`shrink-0 w-10 h-6 rounded-full p-0.5 transition-colors ${editingProduct.show_sold !== false ? 'bg-blue-500' : 'bg-gray-700'}`}>
+                                                    <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${editingProduct.show_sold !== false ? 'translate-x-4' : 'translate-x-0'}`} />
+                                                </span>
+                                            </button>
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-300 mb-1">Tambahan terjual manual <span className="text-gray-500 font-normal">(opsional)</span></label>
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    max={1000000}
+                                                    inputMode="numeric"
+                                                    value={editingProduct.sold_offset ?? 0}
+                                                    onChange={(e) => setEditingProduct({ ...editingProduct, sold_offset: Math.max(0, Math.floor(Number(e.target.value)) || 0) })}
+                                                    className="w-full bg-[#060a1c] border border-[#1a2a5a] rounded-xl px-3.5 py-2 text-white text-xs focus:outline-none focus:border-blue-500"
+                                                />
+                                                <p className="text-[10px] text-gray-500 mt-1 leading-snug">
+                                                    Untuk penjualan sebelum produk ini ada di toko (mis. dari platform lain). Penjualan asli dari pesanan lunas: <b className="text-gray-300">{editingProduct.sold_real || 0}</b> • Jumlah yang tampil: <b className="text-gray-300">{(editingProduct.sold_real || 0) + (editingProduct.sold_offset || 0)}</b>
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
 

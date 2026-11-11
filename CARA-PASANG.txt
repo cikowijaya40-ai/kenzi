@@ -1,18 +1,28 @@
-PATCH KENZI (gabungan): Mode Maintenance Produk + Optimasi Usage Vercel/Supabase + GitHub Sync dihapus
-=====================================================================================================
+PATCH KENZI v3 (gabungan)
+  - Mode Maintenance per produk
+  - Pin produk ke atas + label "Terlaris" + jumlah "Terjual" (bisa diatur admin)
+  - Optimasi usage Vercel/Supabase
+  - GitHub Sync dihapus
+=====================================================================================
 
 1) Timpa semua file di patch ini ke project (struktur folder sama persis).
 
-2) HAPUS 2 file/folder ini dari project (fitur GitHub sync sudah dibuang):
+2) HAPUS dari project (fitur GitHub sync sudah dibuang):
      src/lib/github.ts
      src/app/api/admin/github/            (seluruh folder)
-   Env GITHUB_TOKEN / GITHUB_OWNER / GITHUB_REPOS / GITHUB_BRANCH tidak dipakai lagi, boleh dihapus dari Vercel.
+   Env GITHUB_* di Vercel tidak dipakai lagi, boleh dihapus.
 
-3) Jalankan 2 file SQL ini SEKALI (urutan bebas) di Supabase -> SQL Editor. Aman dijalankan ulang:
-     supabase/migrations/2026-11-product-maintenance.sql   (kolom maintenance produk)
+3) Jalankan 3 file SQL ini SEKALI (urutan bebas) di Supabase -> SQL Editor. Aman dijalankan ulang:
+     supabase/migrations/2026-11-product-maintenance.sql   (kolom maintenance)
+     supabase/migrations/2026-11-product-pin-sold.sql      (kolom pin/terjual/terlaris + fungsi hitung penjualan)
      supabase/migrations/2026-11-usage-optimization.sql    (cron pembersihan DB + index webhook top-up)
 
 4) Deploy ulang ke Vercel.
 
-Catatan: sebelum SQL maintenance dijalankan, simpan produk tetap normal; hanya toggle maintenance yang
+Catatan: sebelum SQL dijalankan, simpan produk tetap normal; hanya field fitur barunya yang
 memunculkan peringatan dan belum tersimpan.
+
+Cara pakai (Admin -> Produk):
+  - Tombol "Pin ke Atas" di kartu produk, atau di Edit Produk -> "Posisi & Penjualan".
+  - Label Terlaris: Otomatis (3 produk terlaris) / Selalu tampil / Sembunyikan.
+  - Jumlah terjual = penjualan asli (pesanan lunas) + "Tambahan terjual manual". Bisa disembunyikan per produk.

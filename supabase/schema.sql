@@ -58,6 +58,10 @@ create table if not exists products (
 -- Instalasi lama: tambahkan kolom maintenance (aman dijalankan ulang)
 alter table products add column if not exists maintenance boolean not null default false;
 alter table products add column if not exists maintenance_note text;
+alter table products add column if not exists pinned boolean not null default false;
+alter table products add column if not exists sold_offset int not null default 0;
+alter table products add column if not exists show_sold boolean not null default true;
+alter table products add column if not exists bestseller_mode text not null default 'auto';
 
 create table if not exists product_items (
   id uuid primary key default gen_random_uuid(),
@@ -377,6 +381,18 @@ begin
    where product_slug = o.product_slug and sku = o.item_sku;
   return query select true, 'PAID'::text;
 end $$;
+
+-- 7e. Penjualan asli per produk (untuk label Terlaris & jumlah terjual di katalog)
+create or replace function product_sales_counts()
+returns table (product_slug text, sold bigint)
+language sql stable security definer set search_path = public as $$
+  select o.product_slug::text, count(*)::bigint
+    from orders o
+   where o.status in ('PAID', 'DELIVERED')
+   group by o.product_slug;
+$$;
+revoke all on function product_sales_counts() from public, anon, authenticated;
+create index if not exists orders_paid_slug_idx on orders (product_slug) where status in ('PAID', 'DELIVERED');
 
 -- 7f (versi baru). Perawatan harian: kadaluarsakan pesanan QRIS yang tak dibayar & bersihkan akun otomatis yang tak pernah beli
 create or replace function run_maintenance()

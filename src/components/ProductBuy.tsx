@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { fixImg, useCatalog } from '@/lib/client';
+import { fixImg, fmtSold, useCatalog } from '@/lib/client';
 import BuySheet from './BuySheet';
 
 /**
@@ -26,6 +26,13 @@ export default function ProductBuy({ slug }: { slug: string }) {
                 <div style={{ minWidth: 0 }}>
                     <span className="cat">{p.publisher || p.category_slug}</span>
                     <h1>{p.name}</h1>
+                    {(p.bestseller || p.pinned || p.sold) ? (
+                        <div className="kx-chips">
+                            {p.bestseller && <span className="hot"><i className="fa-solid fa-fire" /> Terlaris</span>}
+                            {p.pinned && <span className="pin"><i className="fa-solid fa-thumbtack" /> Unggulan</span>}
+                            {p.sold ? <span className="sold"><i className="fa-solid fa-bag-shopping" /> Terjual {fmtSold(p.sold)}</span> : null}
+                        </div>
+                    ) : null}
                 </div>
             </div>
 

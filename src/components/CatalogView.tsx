@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fixImg, rp, useCatalog } from '@/lib/client';
+import { fixImg, fmtSold, rp, useCatalog } from '@/lib/client';
 import BuySheet from './BuySheet';
 
 const catLabel = (s: string) => s.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -97,8 +97,9 @@ export default function CatalogView({ home = false }: { home?: boolean }) {
                     const min = prices.length ? Math.min(...prices) : items.length ? Math.min(...items.map((i) => i.price)) : 0;
                     const desc = (p.description || '').replace(/\s+/g, ' ').trim().slice(0, 140);
                     return (
-                        <article key={p.slug} className={`kx-card${maint ? ' maint' : ''}`}>
+                        <article key={p.slug} className={`kx-card${maint ? ' maint' : ''}${p.pinned ? ' pinned' : ''}`}>
                             <div className="side">
+                                {p.pinned && <span className="pinmark" title="Produk unggulan"><i className="fa-solid fa-thumbtack" /></span>}
                                 <Link href={`/produk/${p.slug}`} className="img" aria-label={p.name} onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); setSheetSlug(p.slug); }}>
                                     <img src={fixImg(p.icon_url || p.banner_url)} alt={p.name} loading="lazy" decoding="async" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />
                                 </Link>
@@ -117,6 +118,8 @@ export default function CatalogView({ home = false }: { home?: boolean }) {
                                         : soldOut
                                             ? <span className="pill out"><i /> Habis</span>
                                             : <span className="pill on"><i /> Tersedia</span>}
+                                    {p.bestseller && <span className="pill hot"><i className="fa-solid fa-fire" /> Terlaris</span>}
+                                    {p.sold ? <span className="sold"><i className="fa-solid fa-bag-shopping" /> Terjual {fmtSold(p.sold)}</span> : null}
                                     <span className="auto"><i className="fa-solid fa-bolt" /> Key otomatis</span>
                                 </div>
                                 {maint && p.maintenance_note && <p className="maint-note"><i className="fa-solid fa-screwdriver-wrench" /> {p.maintenance_note}</p>}

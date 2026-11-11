@@ -42,6 +42,16 @@ export interface Product {
     maintenance?: boolean;
     /** Pesan opsional yang ditampilkan ke pembeli saat maintenance. */
     maintenance_note?: string | null;
+    /** Disematkan: selalu tampil paling atas di katalog. */
+    pinned?: boolean;
+    /** Tambahan jumlah terjual manual (mis. penjualan sebelum toko ini / di platform lain). Ditambahkan ke penjualan asli. */
+    sold_offset?: number;
+    /** Tampilkan jumlah terjual di kartu produk. */
+    show_sold?: boolean;
+    /** Label "Terlaris": auto = top penjualan, on = selalu tampil, off = tidak pernah. */
+    bestseller_mode?: 'auto' | 'on' | 'off';
+    /** Hanya dikirim server -> admin UI (penjualan asli dari pesanan lunas; tidak disimpan ke database). */
+    sold_real?: number;
     sort_order: number;
     items?: ProductItem[];
     /** Hanya dipakai server -> admin UI (tidak disimpan ke database). */
