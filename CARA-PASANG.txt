@@ -1,6 +1,7 @@
-PATCH KENZI v3 (gabungan)
+PATCH KENZI v4 (gabungan)
   - Mode Maintenance per produk
   - Pin produk ke atas + label "Terlaris" + jumlah "Terjual" (bisa diatur admin)
+  - Notifikasi pembelian (popup "F***** baru saja beli") + auto replay + realtime, diatur dari panel admin
   - Optimasi usage Vercel/Supabase
   - GitHub Sync dihapus
 =====================================================================================
@@ -16,13 +17,12 @@ PATCH KENZI v3 (gabungan)
      supabase/migrations/2026-11-product-maintenance.sql   (kolom maintenance)
      supabase/migrations/2026-11-product-pin-sold.sql      (kolom pin/terjual/terlaris + fungsi hitung penjualan)
      supabase/migrations/2026-11-usage-optimization.sql    (cron pembersihan DB + index webhook top-up)
+   Notifikasi pembelian TIDAK butuh SQL baru (memakai tabel orders yang sudah ada).
 
 4) Deploy ulang ke Vercel.
 
-Catatan: sebelum SQL dijalankan, simpan produk tetap normal; hanya field fitur barunya yang
-memunculkan peringatan dan belum tersimpan.
-
-Cara pakai (Admin -> Produk):
-  - Tombol "Pin ke Atas" di kartu produk, atau di Edit Produk -> "Posisi & Penjualan".
-  - Label Terlaris: Otomatis (3 produk terlaris) / Selalu tampil / Sembunyikan.
-  - Jumlah terjual = penjualan asli (pesanan lunas) + "Tambahan terjual manual". Bisa disembunyikan per produk.
+Notifikasi pembelian — Admin -> Pengaturan -> "Notifikasi Pembelian (Popup)":
+  - Aktif/nonaktif, lama tampil tiap notifikasi (detik), jeda antar notifikasi (detik)
+  - Auto replay (putar ulang pembelian terakhir) + jumlah & batas umur pembelian yang diputar
+  - Realtime (pembelian baru langsung muncul) + interval pengecekan 30 dtk / 1 / 2 / 5 menit
+  - Muncul di beranda & halaman produk. Nama disamarkan (inisial + *****), hanya dari pesanan LUNAS.

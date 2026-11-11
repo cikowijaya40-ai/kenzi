@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api, fixImg, refreshMe, rp, useCatalog, useMe } from '@/lib/client';
+import SaleToast from './SaleToast';
 
 /** "KENZIxCheat" → ["KENZIx", "Cheat"]; "Toko Saya" → ["Toko", "Saya"] */
 export function splitBrand(name: string): [string, string] {
@@ -161,6 +162,7 @@ export default function SiteShell({ children, plain = false }: { children: React
                     </div>
                 </footer>
             )}
+            {!plain && (path === '/' || path.startsWith('/produk')) && <SaleToast />}
             {!plain && wa && <a className="kx-fab" href={wa} target="_blank" rel="noopener noreferrer" aria-label="Chat admin"><i className="fa-brands fa-whatsapp" /><span>Chat Admin</span></a>}
         </div>
     );

@@ -1736,6 +1736,99 @@ export default function AdminDashboardPage() {
                             />
                         </div>
 
+                        {/* Notifikasi Pembelian (Social Proof) */}
+                        <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30 space-y-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <h3 className="text-sm font-bold text-emerald-300 uppercase tracking-wider">🔔 Notifikasi Pembelian (Popup)</h3>
+                                    <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">
+                                        Popup kecil &quot;F***** baru saja beli ...&quot; di beranda &amp; halaman produk. Hanya dari pesanan yang benar-benar lunas, nama pembeli disamarkan (inisial + bintang).
+                                    </p>
+                                </div>
+                                <label className="flex items-center gap-2 cursor-pointer shrink-0">
+                                    <input
+                                        type="checkbox"
+                                        checked={settings.activity_enabled !== false}
+                                        onChange={(e) => setSettings({ ...settings, activity_enabled: e.target.checked })}
+                                        className="w-4 h-4 rounded bg-[#0b1329] border-slate-700"
+                                    />
+                                    <span className="text-xs text-gray-300 font-bold">Aktif</span>
+                                </label>
+                            </div>
+
+                            {settings.activity_enabled !== false && (
+                                <>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {([
+                                            ['activity_display_sec', 'Lama tampil tiap notifikasi (detik)', 3, 30, 6],
+                                            ['activity_gap_sec', 'Jeda antar notifikasi (detik)', 3, 300, 10],
+                                            ['activity_max_items', 'Jumlah pembelian terakhir yang diputar ulang', 1, 30, 10],
+                                            ['activity_max_age_hours', 'Hanya pembelian dalam … jam terakhir', 1, 720, 72],
+                                        ] as const).map(([key, label, min, max, def]) => (
+                                            <div key={key}>
+                                                <label className="block text-xs text-gray-300 mb-1">{label}</label>
+                                                <input
+                                                    type="number"
+                                                    min={min}
+                                                    max={max}
+                                                    inputMode="numeric"
+                                                    value={(settings as any)[key] ?? def}
+                                                    onChange={(e) => setSettings({ ...settings, [key]: e.target.value === '' ? undefined : Number(e.target.value) } as any)}
+                                                    onBlur={() => setSettings({ ...settings, [key]: Math.min(max, Math.max(min, Math.floor(Number((settings as any)[key] ?? def)) || def)) } as any)}
+                                                    className="w-full bg-[#0b1329] border border-[#1e2b48] rounded-xl px-3.5 py-2 text-white text-xs focus:outline-none focus:border-emerald-500"
+                                                />
+                                                <p className="text-[10px] text-gray-500 mt-0.5">{min}–{max}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <label className="flex items-start gap-2 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={settings.activity_replay !== false}
+                                            onChange={(e) => setSettings({ ...settings, activity_replay: e.target.checked })}
+                                            className="w-4 h-4 mt-0.5 rounded bg-[#0b1329] border-slate-700"
+                                        />
+                                        <span className="text-xs text-gray-300 leading-snug">
+                                            <b>Auto replay</b> — kalau tidak ada pembelian baru, putar ulang pembelian terakhir secara bergiliran (label waktunya tetap jujur, mis. &quot;3 jam lalu&quot;).
+                                        </span>
+                                    </label>
+
+                                    <div className="space-y-2">
+                                        <label className="flex items-start gap-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={settings.activity_realtime !== false}
+                                                onChange={(e) => setSettings({ ...settings, activity_realtime: e.target.checked })}
+                                                className="w-4 h-4 mt-0.5 rounded bg-[#0b1329] border-slate-700"
+                                            />
+                                            <span className="text-xs text-gray-300 leading-snug">
+                                                <b>Realtime</b> — pembelian baru langsung muncul sebagai popup (&quot;baru saja beli&quot;) tanpa menunggu pengunjung refresh.
+                                            </span>
+                                        </label>
+                                        {settings.activity_realtime !== false && (
+                                            <div className="flex items-center gap-2 pl-6">
+                                                <span className="text-xs text-gray-400">Cek pembelian baru setiap</span>
+                                                <select
+                                                    value={settings.activity_poll_sec ?? 30}
+                                                    onChange={(e) => setSettings({ ...settings, activity_poll_sec: Number(e.target.value) })}
+                                                    className="bg-[#0b1329] border border-[#1e2b48] rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-emerald-500"
+                                                >
+                                                    <option value={30}>30 detik</option>
+                                                    <option value={60}>1 menit</option>
+                                                    <option value={120}>2 menit</option>
+                                                    <option value={300}>5 menit</option>
+                                                </select>
+                                            </div>
+                                        )}
+                                        <p className="text-[10px] text-gray-500 pl-6 leading-snug">
+                                            Hemat kuota Vercel gratis: data popup di-cache CDN 30 detik, pengecekan berhenti saat tab tersembunyi atau pengunjung diam &gt; 5 menit. Interval lebih panjang = lebih hemat.
+                                        </p>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
                         {/* Google Gmail SMTP Configuration */}
                         <div className="p-5 rounded-xl bg-blue-950/20 border border-blue-500/30 space-y-4">
                             <div className="flex items-center justify-between">

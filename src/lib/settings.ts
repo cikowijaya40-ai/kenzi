@@ -53,6 +53,15 @@ export interface SiteSettings {
     wijayapay_proxy_user?: string;
     wijayapay_proxy_pass?: string;
     wijayapay_proxy_enabled?: boolean;
+    /* Notifikasi pembelian (social proof) di katalog */
+    activity_enabled?: boolean;
+    activity_display_sec?: number;
+    activity_gap_sec?: number;
+    activity_replay?: boolean;
+    activity_max_items?: number;
+    activity_max_age_hours?: number;
+    activity_realtime?: boolean;
+    activity_poll_sec?: number;
 }
 
 export const DEFAULT_SETTINGS: SiteSettings = {
@@ -87,6 +96,14 @@ export const DEFAULT_SETTINGS: SiteSettings = {
     wijayapay_proxy_user: '',
     wijayapay_proxy_pass: '',
     wijayapay_proxy_enabled: false,
+    activity_enabled: true,
+    activity_display_sec: 6,
+    activity_gap_sec: 10,
+    activity_replay: true,
+    activity_max_items: 10,
+    activity_max_age_hours: 72,
+    activity_realtime: true,
+    activity_poll_sec: 30,
     thanhub_base_url: '',
     thanhub_api_key: '',
     smtp_host: 'smtp.gmail.com',
