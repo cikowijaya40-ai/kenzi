@@ -204,14 +204,14 @@ export function clearUserSession(res: NextResponse) {
 export async function getUserFromRequest(req: Request): Promise<AppUser | null> {
     const tok = verifyToken<{ k: string; uid: string; v: number }>(readCookie(req, USER_COOKIE));
     if (!tok || tok.k !== 'u') return null;
-    const { data } = await requireDb()
-        .from('users')
-        .select('id, username, email, whatsapp, balance, is_banned, token_version, created_at')
-        .eq('id', tok.uid)
-        .maybeSingle();
+    const base = 'id, username, email, whatsapp, balance, is_banned, token_version, created_at';
+    const db = requireDb();
+    let { data, error } = await db.from('users').select(`${base}, is_reseller`).eq('id', tok.uid).maybeSingle();
+    // Kolom is_reseller belum ada (migrasi Open Reseller belum diterapkan): login tidak boleh ikut rusak.
+    if (error && (error as any).code === '42703') ({ data } = await db.from('users').select(base).eq('id', tok.uid).maybeSingle());
     if (!data || data.is_banned || data.token_version !== tok.v) return null;
     const { token_version, ...pub } = data as any;
-    return { ...pub, balance: Number(pub.balance) } as AppUser;
+    return { ...pub, balance: Number(pub.balance), is_reseller: Boolean(pub.is_reseller) } as AppUser;
 }
 
 /* ───────── ADMIN ───────── */

@@ -113,6 +113,12 @@ export interface Order {
     };
     created_at: string;
     updated_at?: string;
+    /** 'web' (bawaan) atau 'api' (Reseller API v1). */
+    source?: 'web' | 'api';
+    quantity?: number;
+    unit_price?: number | null;
+    api_idem?: string | null;
+    api_sku?: string | null;
 }
 
 export interface AppUser {
@@ -123,11 +129,12 @@ export interface AppUser {
     balance: number;
     is_banned?: boolean;
     created_at?: string;
+    is_reseller?: boolean;
 }
 
 export interface LedgerEntry {
     id: number;
-    kind: 'topup' | 'purchase' | 'refund' | 'admin_adjust';
+    kind: 'topup' | 'purchase' | 'refund' | 'admin_adjust' | 'reseller_fee';
     amount: number;
     balance_after: number;
     ref: string;

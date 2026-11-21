@@ -62,6 +62,11 @@ export interface SiteSettings {
     activity_max_age_hours?: number;
     activity_realtime?: boolean;
     activity_poll_sec?: number;
+    /* Open Reseller + Reseller API v1 */
+    reseller_enabled?: boolean;
+    reseller_price?: number;
+    reseller_discount?: number;
+    reseller_api_enabled?: boolean;
 }
 
 export const DEFAULT_SETTINGS: SiteSettings = {
@@ -106,6 +111,10 @@ export const DEFAULT_SETTINGS: SiteSettings = {
     activity_poll_sec: 30,
     thanhub_base_url: '',
     thanhub_api_key: '',
+    reseller_enabled: true,
+    reseller_price: 50000,
+    reseller_discount: 20,
+    reseller_api_enabled: true,
     smtp_host: 'smtp.gmail.com',
     smtp_port: 465,
     smtp_user: '',

@@ -147,7 +147,7 @@ export async function orderLicenseKey(sku: string, opts: { androidId?: string; r
 export interface LiveVariant { stock: number; buyable: boolean; cost: number }
 
 /** Katalog Thanhub terkini (cache 30 dtk per instance, request bersamaan digabung). null = tidak terbaca → jangan blokir pembeli. */
-async function thLiveMap(): Promise<Map<string, LiveVariant> | null> {
+export async function thLiveMap(): Promise<Map<string, LiveVariant> | null> {
     const cfg = await getThanhubConfig();
     if (!thanhubReady(cfg)) return null;
     try {

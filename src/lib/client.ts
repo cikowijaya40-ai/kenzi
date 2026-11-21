@@ -20,7 +20,7 @@ export async function api<T = any>(path: string, init?: RequestInit & { json?: u
 }
 
 /* ───────── User / saldo (cache 20 dtk di sessionStorage agar tidak spam server) ───────── */
-export interface MeUser { id: string; username: string; email: string; balance: number }
+export interface MeUser { id: string; username: string; email: string; balance: number; is_reseller?: boolean }
 const ME_KEY = 'epep_me';
 const ME_EVENT = 'epep:me';
 let meFlight: Promise<any> | null = null;

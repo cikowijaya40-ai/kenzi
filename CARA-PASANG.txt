@@ -26,3 +26,33 @@ Notifikasi pembelian — Admin -> Pengaturan -> "Notifikasi Pembelian (Popup)":
   - Auto replay (putar ulang pembelian terakhir) + jumlah & batas umur pembelian yang diputar
   - Realtime (pembelian baru langsung muncul) + interval pengecekan 30 dtk / 1 / 2 / 5 menit
   - Muncul di beranda & halaman produk. Nama disamarkan (inisial + *****), hanya dari pesanan LUNAS.
+
+
+=====================================================================================
+PATCH: OPEN RESELLER + RESELLER API v1  (konsep Thanhub / Drip)
+=====================================================================================
+1) MIGRASI OTOMATIS. Tidak perlu menjalankan SQL manual.
+   Skrip scripts/migrate.js jalan sendiri di setiap build (npm run build) dan menerapkan
+   supabase/migrations/2026-11-open-reseller.sql SEKALI (dicatat di tabel app_migrations).
+   Yang perlu kamu lakukan, SEKALI SAJA: tambahkan 1 environment variable di Vercel:
+     DATABASE_URL = URL koneksi Postgres Supabase
+       (Supabase -> Project Settings -> Database -> Connection string -> URI,
+        pilih "Session pooler" (aman untuk Vercel) lalu isi [YOUR-PASSWORD]).
+   Kalau integrasi Vercel-Supabase kamu sudah punya POSTGRES_URL / POSTGRES_URL_NON_POOLING, itu otomatis dipakai.
+   Tanpa DATABASE_URL: build tetap jalan, tapi fitur reseller belum aktif (login & toko normal tetap aman).
+   Alternatif manual: jalankan file SQL itu sekali di Supabase SQL Editor.
+
+2) Deploy ulang (push ke Git). Env lain tidak ada yang baru.
+
+3) Admin -> tombol "Reseller" (/admin/reseller):
+     - buka/tutup pendaftaran, biaya join (bawaan Rp50.000), diskon global (bawaan 20%)
+     - saklar "Reseller API aktif" (mati = semua request /api/v1 ditolak 403)
+     - daftar reseller: nonaktifkan / aktifkan / cabut API key
+     - harga reseller per opsi (kosong = pakai diskon global)
+
+4) Halaman: /reseller (daftar, bayar dari saldo), /reseller/api (buat/ganti/cabut API key), /docs/api (dokumentasi publik).
+   API: /api/v1/{me,balance,products,stock,orders}. Format key: rk_live_ + 48 hex; yang tersimpan hanya hash SHA-256.
+
+5) Kode API (SKU) dibuat otomatis dari NAMA opsi: <slug produk>.<angka><d|h|m>, contoh drip.30d.
+   Nama yang terbaca: "30 Hari", "3 Jam", "15 Menit", "2 Minggu", "1 Bulan", "Lifetime". Opsi yang namanya tidak terbaca
+   atau kodenya kembar tidak masuk API; daftarnya tampil di bagian "Tidak Masuk API" di /admin/reseller.

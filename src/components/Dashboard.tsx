@@ -6,7 +6,7 @@ import { api, refreshMe, rp, setMeBalance } from '@/lib/client';
 
 const KIND: Record<string, [string, string]> = {
     topup: ['fa-arrow-down', 'Isi Saldo'], purchase: ['fa-cart-shopping', 'Pembelian'],
-    refund: ['fa-rotate-left', 'Refund'], admin_adjust: ['fa-user-shield', 'Penyesuaian'],
+    refund: ['fa-rotate-left', 'Refund'], admin_adjust: ['fa-user-shield', 'Penyesuaian'], reseller_fee: ['fa-handshake', 'Biaya Reseller'],
 };
 const dt = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const tagOf = (s: string) => (s === 'PAID' ? 'done' : s === 'PENDING' ? 'pending' : 'expired');
