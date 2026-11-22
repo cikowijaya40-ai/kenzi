@@ -1,11 +1,11 @@
 'use client';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { api, refreshMe, rp, setMeBalance } from '@/lib/client';
+import { api, refreshMe, rp } from '@/lib/client';
 
 interface State {
     enabled: boolean; price: number; discount: number; apiEnabled: boolean;
-    isReseller: boolean; disabled: boolean; since: string | null; keyPrefix: string | null; keyCreatedAt: string | null; balance: number;
+    ready: boolean; isReseller: boolean; disabled: boolean; since: string | null; keyPrefix: string | null; keyCreatedAt: string | null; balance: number;
 }
 const dt = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -15,7 +15,7 @@ function useState_() {
     const load = useCallback(async () => {
         const r: any = await api('/api/reseller/me');
         if (r.status === 401) return setSt(null);
-        if (r.success) { setSt(r as State); setMeBalance(r.balance); }
+        if (r.success) setSt(r as State);      // saldo di menu/header tidak disentuh dari sini
     }, []);
     useEffect(() => { load(); }, [load]);
     return { st, load };
@@ -70,9 +70,10 @@ export function ResellerLanding() {
                 </div>
             )}
 
-            {st && !st.enabled && !st.isReseller && <div className="alert on">Pendaftaran reseller sedang ditutup. Coba lagi nanti.</div>}
+            {st && !st.ready && <div className="alert on">Fitur reseller belum aktif di server (database belum diperbarui). Hubungi admin.</div>}
+            {st && st.ready && !st.enabled && !st.isReseller && <div className="alert on">Pendaftaran reseller sedang ditutup. Coba lagi nanti.</div>}
 
-            {st && st.isReseller && (
+            {st && st.ready && st.isReseller && (
                 <div className="panel" style={{ marginTop: 14 }}>
                     <div className="sub-title" style={{ marginTop: 0 }}>{st.disabled ? 'Reseller dinonaktifkan' : 'Kamu sudah reseller'}</div>
                     <p style={{ margin: '0 0 10px', fontSize: 14 }}>
@@ -82,7 +83,7 @@ export function ResellerLanding() {
                 </div>
             )}
 
-            {st && !st.isReseller && st.enabled && (
+            {st && st.ready && !st.isReseller && st.enabled && (
                 <div className="panel" style={{ marginTop: 14 }}>
                     <div className="sub-title" style={{ marginTop: 0 }}>Daftar Sekarang</div>
                     <div className="det-row"><span>Biaya bergabung (sekali)</span><b>{rp(st.price)}</b></div>
@@ -124,6 +125,7 @@ export function ResellerApiDash() {
 
     if (st === undefined) return <div className="kx-wrap"><div className="kx-empty">Memuat...</div></div>;
     if (st === null) return <div className="kx-wrap"><div className="panel" style={{ marginTop: 16, textAlign: 'center' }}><p>Masuk dulu untuk membuka dashboard reseller.</p><Link href="/login?next=/reseller/api" className="kx-btn-full">Masuk</Link></div></div>;
+    if (!st.ready) return <div className="kx-wrap"><div className="panel" style={{ marginTop: 16, textAlign: 'center' }}><p>Fitur reseller belum aktif di server. Hubungi admin.</p></div></div>;
     if (!st.isReseller) return <div className="kx-wrap"><div className="panel" style={{ marginTop: 16, textAlign: 'center' }}><p>Kamu belum menjadi reseller.</p><Link href="/reseller" className="kx-btn-full">Daftar Reseller</Link></div></div>;
 
     return (

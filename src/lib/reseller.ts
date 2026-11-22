@@ -1,7 +1,9 @@
 import crypto from 'crypto';
 import { requireDb } from './supabase';
 import { bust, memo } from './cache';
-import { rateLimit, sha256 } from './security';
+import { hashPassword, rateLimit, sha256, validatePasswordStrength } from './security';
+import { EMAIL_RE, USERNAME_RE, sanitizeText } from './users';
+import { adminAdjust } from './wallet';
 import { judgeLive, thBuy, thLiveMap, thVariantId } from './thanhub';
 import type { AppUser } from './types';
 
@@ -221,27 +223,31 @@ export async function revokeApiKey(userId: string): Promise<boolean> {
 }
 
 /* ═════════ DAFTAR RESELLER (sisi web) ═════════ */
-export async function getResellerState(userId: string) {
-    const [cfg, { data }] = await Promise.all([
+export async function getResellerState(user: { id: string; balance: number }) {
+    const [cfg, { data, error }] = await Promise.all([
         getResellerConfig(),
-        requireDb().from('users').select('balance, is_reseller, reseller_disabled, reseller_since, api_key_prefix, api_key_created_at').eq('id', userId).maybeSingle(),
+        requireDb().from('users').select('is_reseller, reseller_disabled, reseller_since, api_key_prefix, api_key_created_at').eq('id', user.id).maybeSingle(),
     ]);
+    // ready=false: kolom reseller belum ada di database (migrasi belum diterapkan). Jangan pura-pura "bukan reseller".
     return {
+        ready: !error,
         enabled: cfg.enabled, price: cfg.price, discount: cfg.discount, apiEnabled: cfg.apiEnabled,
         isReseller: Boolean(data?.is_reseller), disabled: Boolean(data?.reseller_disabled), since: data?.reseller_since || null,
-        keyPrefix: data?.api_key_prefix || null, keyCreatedAt: data?.api_key_created_at || null, balance: Number(data?.balance ?? 0),
+        keyPrefix: data?.api_key_prefix || null, keyCreatedAt: data?.api_key_created_at || null,
+        balance: Number(user.balance) || 0,      // sumber saldo = akun yang login, bukan hasil query di atas
     };
 }
 
 export async function joinReseller(user: AppUser): Promise<{ success: true; balance: number } | { success: false; code: string; message: string }> {
     const cfg = await getResellerConfig();
     if (!cfg.enabled) return { success: false, code: 'CLOSED', message: 'Pendaftaran reseller sedang ditutup.' };
+    if (!(await getResellerState(user)).ready) return { success: false, code: 'NOT_READY', message: 'Fitur reseller belum aktif di server (database belum diperbarui). Hubungi admin.' };
     const invoice = `RSL-${stampNow()}-${rid()}`;
     const { data, error } = await requireDb().rpc('reseller_join', { p_user: user.id, p_fee: cfg.price, p_invoice: invoice });
     if (error) {
         const m = error.message || '';
         if (m.includes('ALREADY_RESELLER')) {
-            const st = await getResellerState(user.id);
+            const st = await getResellerState(user);
             return { success: false, code: 'ALREADY_RESELLER', message: st.disabled ? 'Akun reseller kamu sedang dinonaktifkan admin. Hubungi admin.' : 'Kamu sudah menjadi reseller.' };
         }
         if (m.includes('INSUFFICIENT_BALANCE')) return { success: false, code: 'INSUFFICIENT_BALANCE', message: `Saldo tidak cukup. Biaya bergabung Rp ${cfg.price.toLocaleString('id-ID')}, isi saldo dulu.` };
@@ -482,11 +488,26 @@ export async function getApiOrder(userId: string, idOrCode: string) {
 }
 
 /* ═════════ ADMIN ═════════ */
-export async function adminListResellers() {
-    const { data, error } = await requireDb().from('users')
-        .select('id, username, email, balance, is_banned, reseller_disabled, reseller_since, api_key_prefix, api_key_created_at')
-        .eq('is_reseller', true).order('reseller_since', { ascending: false }).limit(300);
-    if (error) throw new Error(error.message);
+const esc = (v: string) => v.replace(/[\\%_]/g, (c) => '\\' + c);
+const PW_ALPHABET = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/** Password acak 12 karakter (tanpa huruf/angka yang mirip), dijamin lolos aturan password toko. */
+export function randomPassword(len = 12): string {
+    for (;;) {
+        const pw = Array.from({ length: len }, () => PW_ALPHABET[crypto.randomInt(PW_ALPHABET.length)]).join('');
+        if (!validatePasswordStrength(pw)) return pw;
+    }
+}
+
+export async function adminListResellers(search = '', limit = 200) {
+    let q = requireDb().from('users')
+        .select('id, username, email, whatsapp, balance, is_banned, reseller_disabled, reseller_since, api_key_prefix, api_key_created_at, created_at, last_login_at')
+        .eq('is_reseller', true).order('reseller_since', { ascending: false }).limit(limit);
+    // `_` dan `%` adalah wildcard di ILIKE; di-escape supaya mencari "resel_" tidak ikut menemukan "reseller1"
+    const t = esc(sanitizeText(search, 50).replace(/[,()\\]/g, ''));
+    if (t) q = q.or(`username.ilike.%${t}%,email.ilike.%${t}%`);
+    const { data, error } = await q;
+    if (error) throw new Error(error.message.includes('is_reseller') ? 'Kolom reseller belum ada di database. Jalankan migrasi (lihat CARA-PASANG.txt).' : error.message);
     const ids = (data || []).map((u: any) => u.id);
     const counts: Record<string, number> = {};
     if (ids.length) {
@@ -494,6 +515,150 @@ export async function adminListResellers() {
         for (const o of ords || []) counts[o.user_id] = (counts[o.user_id] || 0) + 1;
     }
     return (data || []).map((u: any) => ({ ...u, balance: Number(u.balance), api_orders: counts[u.id] || 0 }));
+}
+
+const DUP_MSG = 'Username atau email sudah dipakai akun lain.';
+const isDup = (m: string) => /duplicate|unique|23505/i.test(m || '');
+
+async function findUserBy(identifier: string) {
+    const id = sanitizeText(identifier, 255).toLowerCase();
+    if (!id) return null;
+    const col = id.includes('@') ? 'email' : 'username';
+    const { data } = await requireDb().from('users').select('id, username, email, is_reseller, reseller_disabled, is_banned').ilike(col, esc(id)).maybeSingle();
+    return data as any;
+}
+
+function cleanProfile(b: any, partial: boolean) {
+    const out: Record<string, any> = {};
+    if (!partial || b.username !== undefined) {
+        const username = sanitizeText(b.username, 20);
+        if (!USERNAME_RE.test(username)) throw new Error('Username 3–20 karakter, hanya huruf, angka, dan underscore.');
+        out.username = username;
+    }
+    if (!partial || b.email !== undefined) {
+        const email = sanitizeText(b.email, 120).toLowerCase();
+        if (!EMAIL_RE.test(email)) throw new Error('Format email tidak valid.');
+        out.email = email;
+    }
+    if (b.whatsapp !== undefined) {
+        const wa = sanitizeText(b.whatsapp, 20).replace(/[^\d+]/g, '');
+        out.whatsapp = wa || null;
+    }
+    return out;
+}
+
+/** Admin membuat akun reseller baru (tanpa biaya join). Akun langsung bisa login dan reseller aktif. */
+export async function adminCreateReseller(adminName: string, b: any) {
+    const prof = cleanProfile(b, false);
+    const supplied = String(b.password || '');
+    const generated = !supplied;
+    const password = generated ? randomPassword() : supplied;
+    const weak = validatePasswordStrength(password);
+    if (weak) throw new Error(weak);
+    const balance = Math.trunc(Number(b.balance) || 0);
+    if (balance < 0 || balance > 100_000_000) throw new Error('Saldo awal tidak valid (0 – 100.000.000).');
+
+    const db = requireDb();
+    const [u1, u2] = await Promise.all([
+        db.from('users').select('id').ilike('username', esc(prof.username)).limit(1),
+        db.from('users').select('id').ilike('email', esc(prof.email)).limit(1),
+    ]);
+    if (u1.data?.length || u2.data?.length) throw new Error(DUP_MSG);
+
+    const { data, error } = await db.from('users').insert({
+        ...prof, password_hash: await hashPassword(password), is_reseller: true, reseller_since: new Date().toISOString(),
+    }).select('id, username, email').single();
+    if (error) {
+        if (isDup(error.message)) throw new Error(DUP_MSG);
+        throw new Error(error.message.includes('is_reseller') ? 'Kolom reseller belum ada di database. Jalankan migrasi (lihat CARA-PASANG.txt).' : error.message);
+    }
+    try {
+        if (balance > 0) await adminAdjust(data.id, balance, 'Saldo awal reseller', adminName);
+    } catch (e) {
+        await db.from('users').delete().eq('id', data.id);      // jangan sisakan akun setengah jadi
+        throw e;
+    }
+    let key: string | null = null;
+    if (b.withKey) { const k = await createApiKey(data.id); if (k.ok) key = k.key; }
+    return { id: data.id, username: data.username, email: data.email, balance, password: generated ? password : null, key };
+}
+
+/** Jadikan akun yang sudah ada sebagai reseller (gratis). Cari lewat username / email / userId. */
+export async function adminPromote(b: any) {
+    const u = b.userId && /^[0-9a-f-]{36}$/i.test(String(b.userId))
+        ? (await requireDb().from('users').select('id, username, email, is_reseller, reseller_disabled, is_banned').eq('id', b.userId).maybeSingle()).data
+        : await findUserBy(String(b.identifier || ''));
+    if (!u) throw new Error('Akun tidak ditemukan. Isi username atau email yang terdaftar.');
+    if (u.is_reseller) throw new Error(`${u.username} sudah menjadi reseller${u.reseller_disabled ? ' (sedang dinonaktifkan, aktifkan lewat tombol Aktifkan)' : ''}.`);
+    const { error } = await requireDb().from('users').update({ is_reseller: true, reseller_disabled: false, reseller_since: new Date().toISOString() }).eq('id', u.id);
+    if (error) throw new Error(error.message);
+    return { id: u.id, username: u.username, email: u.email };
+}
+
+export async function adminUpdateReseller(userId: string, b: any) {
+    const patch = cleanProfile(b, true);
+    if (!Object.keys(patch).length) throw new Error('Tidak ada yang diubah.');
+    if (patch.username || patch.email) {
+        const db = requireDb();
+        const checks = await Promise.all([
+            patch.username ? db.from('users').select('id').ilike('username', esc(patch.username)).neq('id', userId).limit(1) : Promise.resolve({ data: [] as any[] }),
+            patch.email ? db.from('users').select('id').ilike('email', esc(patch.email)).neq('id', userId).limit(1) : Promise.resolve({ data: [] as any[] }),
+        ]);
+        if (checks.some((c: any) => c.data?.length)) throw new Error(DUP_MSG);
+    }
+    const { data, error } = await requireDb().from('users').update(patch).eq('id', userId).eq('is_reseller', true).select('id, username, email');
+    if (error) { if (isDup(error.message)) throw new Error(DUP_MSG); throw new Error(error.message); }
+    if (!data?.length) throw new Error('Reseller tidak ditemukan.');
+    return data[0];
+}
+
+/** Reset password. Kosongkan password = dibuatkan otomatis. Semua sesi login lama langsung tidak berlaku. */
+export async function adminResetPassword(userId: string, password?: string) {
+    const generated = !password;
+    const pw = generated ? randomPassword() : String(password);
+    const weak = validatePasswordStrength(pw);
+    if (weak) throw new Error(weak);
+    const db = requireDb();
+    const { data: cur } = await db.from('users').select('token_version').eq('id', userId).maybeSingle();
+    if (!cur) throw new Error('Akun tidak ditemukan.');
+    const { error } = await db.from('users').update({ password_hash: await hashPassword(pw), token_version: (cur.token_version || 0) + 1 }).eq('id', userId);
+    if (error) throw new Error(error.message);
+    return { password: generated ? pw : null };
+}
+
+/** Admin membuatkan API key untuk reseller (tampil sekali di layar admin). Key lama mati. */
+export async function adminCreateKeyFor(userId: string) {
+    const r = await createApiKey(userId);
+    if (!r.ok) throw new Error(r.message);
+    return { key: r.key, prefix: r.prefix };
+}
+
+export async function adminSetBanned(userId: string, banned: boolean) {
+    const db = requireDb();
+    const { data: u } = await db.from('users').select('token_version').eq('id', userId).maybeSingle();
+    if (!u) throw new Error('Akun tidak ditemukan.');
+    const { error } = await db.from('users').update({ is_banned: banned, token_version: (u.token_version || 0) + 1 }).eq('id', userId);
+    if (error) throw new Error(error.message);
+}
+
+/** Cabut status reseller (akun tetap ada sebagai user biasa, saldo tetap, API key dicabut). */
+export async function adminDemote(userId: string) {
+    const { data, error } = await requireDb().from('users').update({
+        is_reseller: false, reseller_disabled: false, reseller_since: null, api_key_hash: null, api_key_prefix: null, api_key_created_at: null,
+    }).eq('id', userId).eq('is_reseller', true).select('id');
+    if (error) throw new Error(error.message);
+    if (!data?.length) throw new Error('Reseller tidak ditemukan.');
+}
+
+/** Hapus akun reseller permanen. Wajib ketik ulang username. Order tetap ada; mutasi saldo & riwayat isi saldo ikut terhapus. */
+export async function adminDeleteReseller(userId: string, confirmUsername: string) {
+    const db = requireDb();
+    const { data: u } = await db.from('users').select('id, username, is_reseller').eq('id', userId).maybeSingle();
+    if (!u || !u.is_reseller) throw new Error('Reseller tidak ditemukan.');
+    if (String(confirmUsername || '').trim().toLowerCase() !== String(u.username).toLowerCase()) throw new Error('Konfirmasi username tidak cocok. Akun tidak dihapus.');
+    const { error } = await db.from('users').delete().eq('id', userId);
+    if (error) throw new Error(error.message);
+    return { username: u.username };
 }
 
 export async function adminSetResellerDisabled(userId: string, disabled: boolean) {

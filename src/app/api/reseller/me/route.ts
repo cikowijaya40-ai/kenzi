@@ -7,5 +7,5 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
     const auth = await requireUser(req);
     if ('res' in auth) return auth.res;
-    return json({ success: true, ...(await getResellerState(auth.user.id)) });
+    return json({ success: true, ...(await getResellerState(auth.user)) });
 }

@@ -17,7 +17,8 @@ export async function POST(req: Request) {
         const rl = await rateLimit(`rslkey:${auth.user.id}`, 10, 600);
         if (!rl.allowed) return fail('Terlalu banyak percobaan. Coba lagi sebentar.', 429);
 
-        const st = await getResellerState(auth.user.id);
+        const st = await getResellerState(auth.user);
+        if (!st.ready) return fail('Fitur reseller belum aktif di server. Hubungi admin.', 503);
         if (!st.isReseller) return fail('Kamu belum menjadi reseller.', 403);
         if (st.disabled) return fail('Akun reseller kamu sedang dinonaktifkan admin.', 403);
 
