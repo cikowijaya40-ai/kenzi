@@ -109,7 +109,7 @@ async function buy(sku, quantity = 1, idem = crypto.randomUUID()) {
                     <P><Tag m="GET" /><b>/balance</b>: saldo terbaru.</P>
                     <Code>{`{ "data": { "balance": 150000, "currency": "IDR" } }`}</Code>
 
-                    <P><Tag m="GET" /><b>/products</b>: katalog datar, 1 item = 1 produk + 1 durasi. <K>price</K> adalah harga reseller. <K>stock</K> bernilai <K>null</K> karena stok key live dari penyedia; pakai <K>inStock</K>.</P>
+                    <P><Tag m="GET" /><b>/products</b>: katalog datar, 1 item = 1 produk + 1 durasi. <K>price</K> adalah harga reseller (produk yang tidak masuk program harga reseller memakai harga normal). <K>stock</K> bernilai <K>null</K> karena stok key live dari penyedia; pakai <K>inStock</K>.</P>
                     <Code>{`{ "data": { "currency": "IDR", "priceTier": "reseller", "items": [
   { "apiCode": "drip.30d", "name": "DRIP - 30 Hari", "product": "DRIP", "productApiCode": "drip",
     "category": "android", "label": "30 Hari", "days": 30, "unit": "d", "price": 120000, "currency": "IDR",

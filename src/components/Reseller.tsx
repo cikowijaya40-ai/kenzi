@@ -14,7 +14,7 @@ import Turnstile from './Turnstile';
 type Tab = 'orders' | 'ledger' | 'api';
 interface CatItem { sku: string; label: string; apiCode: string | null; price: number; normal: number; inStock: boolean }
 interface P {
-    ready: boolean; enabled: boolean; price: number; discount: number; apiEnabled: boolean;
+    ready: boolean; enabled: boolean; price: number; discount: number; apiEnabled: boolean; scope: 'all' | 'selected'; names: string[];
     isReseller: boolean; disabled: boolean; since: string | null; keyPrefix: string | null; keyCreatedAt: string | null; balance: number;
     user: { username: string; email: string }; active: boolean;
     stats?: { keys: number; spent: number; todayKeys: number; todaySpent: number; d30Keys: number; d30Spent: number };
@@ -25,6 +25,10 @@ interface P {
 }
 const dt = (s: string) => new Date(s).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const KIND: Record<string, string> = { topup: 'Isi saldo', purchase: 'Pembelian', refund: 'Refund', admin_adjust: 'Penyesuaian admin', reseller_fee: 'Biaya reseller' };
+/** Kalimat cakupan harga reseller: semua produk, atau hanya produk tertentu. */
+const scopeText = (p: { scope: 'all' | 'selected'; names: string[]; discount: number }) =>
+    p.scope === 'all' ? `diskon sekitar ${p.discount}% di seluruh toko`
+        : p.names.length ? `harga khusus untuk ${p.names.join(', ')} (produk lain tetap harga normal)` : 'harga khusus untuk produk tertentu (produk lain tetap harga normal)';
 const grey: React.CSSProperties = { background: '#fff', color: 'var(--text)', border: '1px solid var(--line)', boxShadow: 'none' };
 
 function usePortal() {
@@ -104,7 +108,7 @@ function NotReseller({ p, reload }: { p: P; reload: () => void }) {
             {p.ready && !p.isReseller && (
                 <div className="panel" style={{ marginTop: 14 }}>
                     <div className="sub-title" style={{ marginTop: 0 }}>Akun ini belum reseller</div>
-                    <p style={{ fontSize: 14, margin: '0 0 10px' }}>Reseller melihat harga lebih murah (sekitar {p.discount}% dari harga biasa) di seluruh toko, pembelian memotong saldo otomatis, dan bisa memakai API.</p>
+                    <p style={{ fontSize: 14, margin: '0 0 10px' }}>Reseller mendapat {scopeText(p)}, pembelian memotong saldo otomatis, dan bisa memakai API.</p>
                     {!p.enabled ? <div className="alert on">Pendaftaran mandiri sedang ditutup. Hubungi admin untuk dijadikan reseller.</div> : (
                         <>
                             <div className="det-row"><span>Biaya bergabung (sekali)</span><b>{rp(p.price)}</b></div>
@@ -166,7 +170,7 @@ function Dashboard({ p, reload, initialTab }: { p: P; reload: () => void; initia
 
             <div className="panel" style={{ marginTop: 12, display: 'flex', gap: 12, alignItems: 'center' }}>
                 <i className="fa-solid fa-crown" style={{ fontSize: 24, color: '#d97706' }} />
-                <div><b style={{ color: '#16a34a' }}><i className="fa-solid fa-circle-check" /> Reseller Aktif</b><div style={{ fontSize: 13 }}>Kamu melihat harga reseller (diskon sekitar {p.discount}%) di seluruh toko · pembelian memotong saldo otomatis.</div></div>
+                <div><b style={{ color: '#16a34a' }}><i className="fa-solid fa-circle-check" /> Reseller Aktif</b><div style={{ fontSize: 13 }}>Kamu mendapat {scopeText(p)} · pembelian memotong saldo otomatis.</div></div>
             </div>
 
             <div className="panel" style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -252,7 +256,7 @@ function Dashboard({ p, reload, initialTab }: { p: P; reload: () => void; initia
                     </div>
                     <div className="panel" style={{ marginTop: 12 }}>
                         <div className="sub-title" style={{ marginTop: 0 }}>Produk Kamu <small style={{ fontWeight: 600 }}>({rows.length} varian)</small></div>
-                        <p className="hint">Pakai <b>kode API</b> di <code>POST /api/v1/orders</code>. Ketuk kode untuk menyalin. Varian tanpa kode tidak masuk API, tapi tetap bisa dibeli di web dengan harga reseller.</p>
+                        <p className="hint">Pakai <b>kode API</b> di <code>POST /api/v1/orders</code>. Ketuk kode untuk menyalin. Varian tanpa kode tidak masuk API, tapi tetap bisa dibeli di web. Harga dicoret = harga normal, hanya produk yang masuk program yang lebih murah.</p>
                         <div className="f-in"><input placeholder="Cari produk atau kode..." value={q} onChange={(e) => setQ(e.target.value)} /></div>
                         <div style={{ overflowX: 'auto', marginTop: 8 }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

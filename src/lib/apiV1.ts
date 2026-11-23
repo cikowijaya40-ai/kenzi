@@ -51,7 +51,7 @@ export async function handleV1(req: Request, segments: string[], method: 'GET' |
         }
         if (route === 'products') {
             const cfg = await getResellerConfig();
-            return out(200, { data: { currency: CURRENCY, priceTier: 'reseller', items: await buildApiProducts(cfg.discount) } });
+            return out(200, { data: { currency: CURRENCY, priceTier: 'reseller', items: await buildApiProducts(cfg) } });
         }
         if (route === 'stock') {
             const sku = (url.searchParams.get('sku') || '').trim();
@@ -59,7 +59,7 @@ export async function handleV1(req: Request, segments: string[], method: 'GET' |
             const row = await resolveSku(sku);
             if (!row) return fail(404, 'UNKNOWN_SKU', 'SKU tidak ditemukan.');
             const cfg = await getResellerConfig();
-            return out(200, { data: await stockOf(row, cfg.discount) });
+            return out(200, { data: await stockOf(row, cfg) });
         }
         if (route === 'orders.list') {
             const page = int(url.searchParams.get('page'), 1, 1, 100000);

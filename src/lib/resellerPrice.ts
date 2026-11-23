@@ -6,7 +6,11 @@ import { memo } from './cache';
  * supaya bisa dipakai alur beli (wallet.ts, checkout.ts) tanpa import melingkar.
  * SEMUA harga dihitung di server dari database; angka dari browser tidak pernah dipercaya.
  */
-export interface ResellerConfig { enabled: boolean; price: number; discount: number; apiEnabled: boolean }
+/**
+ * scope 'all'      = harga reseller berlaku untuk SEMUA produk (bawaan).
+ * scope 'selected' = hanya produk di `slugs`; produk lain tetap harga normal (tidak ada diskon / harga khusus).
+ */
+export interface ResellerConfig { enabled: boolean; price: number; discount: number; apiEnabled: boolean; scope: 'all' | 'selected'; slugs: string[] }
 
 /** Dibaca langsung dari DB dengan cache 5 detik (bukan cache 60 detik settings) supaya tombol "matikan API" cepat berlaku. */
 export async function getResellerConfig(): Promise<ResellerConfig> {
@@ -19,6 +23,8 @@ export async function getResellerConfig(): Promise<ResellerConfig> {
             price: Math.min(100_000_000, Math.max(0, Math.round(num(v.reseller_price, 50000)))),
             discount: Math.min(90, Math.max(0, num(v.reseller_discount, 20))),
             apiEnabled: v.reseller_api_enabled !== false,
+            scope: v.reseller_scope === 'selected' ? 'selected' : 'all',
+            slugs: Array.isArray(v.reseller_slugs) ? v.reseller_slugs.filter((x: unknown) => typeof x === 'string').map((x: string) => x.toLowerCase()).slice(0, 500) : [],
         };
     });
 }
@@ -37,6 +43,16 @@ export function resellerPriceOf(item: { price: number; reseller_price?: number |
     return Math.max(0, Math.min(base, pub));
 }
 
+/** Apakah produk ini termasuk program harga reseller? */
+export function isEligible(cfg: ResellerConfig, slug: string): boolean {
+    return cfg.scope === 'all' || cfg.slugs.includes(String(slug).toLowerCase());
+}
+
+/** Harga reseller satu opsi dengan memperhitungkan cakupan produk: produk di luar cakupan = harga normal. */
+export function resellerUnitPrice(cfg: ResellerConfig, slug: string, item: { price: number; reseller_price?: number | null }): number {
+    return isEligible(cfg, slug) ? resellerPriceOf(item, cfg.discount) : Math.round(Number(item.price) || 0);
+}
+
 /**
  * Harga reseller untuk pembelian lewat WEB (saldo maupun QRIS) oleh akun reseller AKTIF.
  * null = tidak berlaku (bukan reseller / dinonaktifkan / kolom belum ada / harga reseller tidak lebih murah) -> pakai harga biasa.
@@ -50,7 +66,7 @@ export async function resellerWebPrice(userId: string, slug: string, sku: string
         if (e2 || !it) return null;
         const cfg = await getResellerConfig();
         const pub = Math.round(Number(it.price));
-        const rp = resellerPriceOf({ price: pub, reseller_price: it.reseller_price }, cfg.discount);
+        const rp = resellerUnitPrice(cfg, slug, { price: pub, reseller_price: it.reseller_price });
         return rp > 0 && rp < pub ? rp : null;
     } catch {
         return null;
@@ -68,7 +84,7 @@ export async function resellerPriceMap(): Promise<Record<string, number>> {
         const out: Record<string, number> = {};
         for (const it of data || []) {
             const pub = Math.round(Number(it.price));
-            const rp = resellerPriceOf({ price: pub, reseller_price: it.reseller_price }, cfg.discount);
+            const rp = resellerUnitPrice(cfg, it.product_slug, { price: pub, reseller_price: it.reseller_price });
             if (rp > 0 && rp < pub) out[`${it.product_slug}|${it.sku}`] = rp;
         }
         return out;

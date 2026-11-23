@@ -67,6 +67,8 @@ export interface SiteSettings {
     reseller_price?: number;
     reseller_discount?: number;
     reseller_api_enabled?: boolean;
+    reseller_scope?: 'all' | 'selected';
+    reseller_slugs?: string[];
 }
 
 export const DEFAULT_SETTINGS: SiteSettings = {
@@ -115,6 +117,8 @@ export const DEFAULT_SETTINGS: SiteSettings = {
     reseller_price: 50000,
     reseller_discount: 20,
     reseller_api_enabled: true,
+    reseller_scope: 'all',
+    reseller_slugs: [],
     smtp_host: 'smtp.gmail.com',
     smtp_port: 465,
     smtp_user: '',

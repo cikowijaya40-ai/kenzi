@@ -22,8 +22,8 @@ const rid = () => Math.random().toString(36).slice(2, 7).toUpperCase();
 const stampNow = () => Date.now().toString().slice(-8);
 
 /* ═════════ PENGATURAN & HARGA: lihat resellerPrice.ts (dipakai juga oleh wallet.ts / checkout.ts) ═════════ */
-export { getResellerConfig, resellerPriceOf, type ResellerConfig } from './resellerPrice';
-import { getResellerConfig, resellerPriceOf } from './resellerPrice';
+export { getResellerConfig, resellerPriceOf, resellerUnitPrice, isEligible, type ResellerConfig } from './resellerPrice';
+import { getResellerConfig, isEligible, resellerPriceOf, resellerUnitPrice, type ResellerConfig } from './resellerPrice';
 
 /* ═════════ SKU ═════════ */
 
@@ -152,10 +152,10 @@ export interface ApiProductItem {
 }
 
 /** stock = null karena stok key hidup di provider (live). inStock sudah memperhitungkan stok live. */
-export async function buildApiProducts(discount: number): Promise<ApiProductItem[]> {
+export async function buildApiProducts(cfg: ResellerConfig): Promise<ApiProductItem[]> {
     const [{ rows }, live] = await Promise.all([loadCatalogRows(), thLiveMap().catch(() => null)]);
     return rows.map((r) => {
-        const price = resellerPriceOf({ price: r.publicPrice, reseller_price: r.resellerOverride }, discount);
+        const price = resellerUnitPrice(cfg, r.productSlug, { price: r.publicPrice, reseller_price: r.resellerOverride });
         const liveOk = live ? judgeLive(live.get(thVariantId(r.itemSku)), price).ok : true;
         return {
             apiCode: r.apiCode, name: `${r.product} - ${r.label}`, product: r.product, productApiCode: r.productSlug.toLowerCase(),
@@ -165,8 +165,8 @@ export async function buildApiProducts(discount: number): Promise<ApiProductItem
     });
 }
 
-export async function stockOf(row: ApiRow, discount: number) {
-    const price = resellerPriceOf({ price: row.publicPrice, reseller_price: row.resellerOverride }, discount);
+export async function stockOf(row: ApiRow, cfg: ResellerConfig) {
+    const price = resellerUnitPrice(cfg, row.productSlug, { price: row.publicPrice, reseller_price: row.resellerOverride });
     const live = await thLiveMap().catch(() => null);
     const liveOk = live ? judgeLive(live.get(thVariantId(row.itemSku)), price).ok : true;
     return { apiCode: row.apiCode, stock: null as number | null, inStock: !row.maintenance && row.localInStock && price > 0 && liveOk, is_maintenance: row.maintenance };
@@ -203,9 +203,16 @@ export async function getResellerState(user: { id: string; balance: number }) {
         requireDb().from('users').select('is_reseller, reseller_disabled, reseller_since, api_key_prefix, api_key_created_at').eq('id', user.id).maybeSingle(),
     ]);
     // ready=false: kolom reseller belum ada di database (migrasi belum diterapkan). Jangan pura-pura "bukan reseller".
+    // Nama produk yang masuk program (untuk teks di portal); kosong bila berlaku untuk semua produk
+    let names: string[] = [];
+    if (cfg.scope === 'selected' && cfg.slugs.length) {
+        const { data: pr } = await requireDb().from('products').select('slug, name').eq('is_active', true).in('slug', cfg.slugs);
+        names = (pr || []).map((x: any) => x.name);
+    }
     return {
         ready: !error,
         enabled: cfg.enabled, price: cfg.price, discount: cfg.discount, apiEnabled: cfg.apiEnabled,
+        scope: cfg.scope, names,
         isReseller: Boolean(data?.is_reseller), disabled: Boolean(data?.reseller_disabled), since: data?.reseller_since || null,
         keyPrefix: data?.api_key_prefix || null, keyCreatedAt: data?.api_key_created_at || null,
         balance: Number(user.balance) || 0,      // sumber saldo = akun yang login, bukan hasil query di atas
@@ -219,7 +226,7 @@ const wibStartOfDay = (now = Date.now()) => {
 };
 
 /** Katalog untuk tabel "Produk Kamu": semua opsi aktif, harga reseller + harga biasa + kode API (kalau namanya terbaca). */
-async function portalCatalog(discount: number) {
+async function portalCatalog(cfg: ResellerConfig) {
     const db = requireDb();
     const [p, i, live] = await Promise.all([
         db.from('products').select('slug, name, category_slug, maintenance, sort_order').eq('is_active', true).order('sort_order', { ascending: true }).range(0, 999),
@@ -237,7 +244,7 @@ async function portalCatalog(discount: number) {
         return {
             slug: pr.slug, name: pr.name, maintenance: maint,
             items: items.map((it) => {
-                const price = resellerPriceOf({ price: it.price, reseller_price: it.reseller_price }, discount);
+                const price = resellerUnitPrice(cfg, pr.slug, { price: it.price, reseller_price: it.reseller_price });
                 const liveOk = live ? judgeLive(live.get(thVariantId(it.sku)), price).ok : true;
                 return {
                     sku: it.sku, label: it.name, apiCode: codes.get(it.id) || null, price, normal: Math.round(it.price),
@@ -278,7 +285,7 @@ export async function getPortal(user: { id: string; username: string; email: str
         db.from('orders').select('invoice_no, product_name, item_name, quantity, total_amount, status, delivery_status, source, created_at')
             .eq('user_id', user.id).neq('status', 'EXPIRED').order('created_at', { ascending: false }).limit(5000),
         listLedger(user.id, 50),
-        portalCatalog(cfg.discount),
+        portalCatalog(cfg),
         topSellersRaw(),
     ]);
     const all: any[] = ords.data || [];
@@ -455,7 +462,7 @@ export async function createApiOrder(user: ApiUser, input: { idem: string; sku: 
     if (!row) return E(404, 'UNKNOWN_SKU', 'SKU tidak ditemukan.');
     if (row.maintenance) return E(400, 'PRODUCT_MAINTENANCE', 'Produk sedang maintenance.');
     const cfg = await getResellerConfig();
-    const unit = resellerPriceOf({ price: row.publicPrice, reseller_price: row.resellerOverride }, cfg.discount);
+    const unit = resellerUnitPrice(cfg, row.productSlug, { price: row.publicPrice, reseller_price: row.resellerOverride });
     if (unit <= 0) return E(400, 'PRODUCT_MAINTENANCE', 'Produk sedang tidak tersedia.');
 
     // 3) Satu order per reseller sekaligus
@@ -734,16 +741,37 @@ export async function adminSetResellerDisabled(userId: string, disabled: boolean
 }
 
 /** Daftar opsi + harga reseller efektif + kode API (atau alasan kenapa tidak masuk API), untuk halaman admin. */
-export async function adminItemRows(discount: number) {
+export async function adminItemRows(cfg: ResellerConfig) {
     bust('rsl:catalog');
     const { rows, excluded } = await loadCatalogRows();
     return {
         included: rows.map((r) => ({
             itemId: r.itemId, product: r.product, label: r.label, apiCode: r.apiCode, publicPrice: r.publicPrice,
-            resellerOverride: r.resellerOverride, effective: resellerPriceOf({ price: r.publicPrice, reseller_price: r.resellerOverride }, discount),
+            resellerOverride: r.resellerOverride, eligible: isEligible(cfg, r.productSlug), slug: r.productSlug,
+            effective: resellerUnitPrice(cfg, r.productSlug, { price: r.publicPrice, reseller_price: r.resellerOverride }),
         })),
         excluded,
     };
+}
+
+/** Semua produk aktif (untuk memilih produk mana yang masuk program harga reseller). */
+export async function adminProductList() {
+    const { data, error } = await requireDb().from('products').select('slug, name').eq('is_active', true).order('sort_order', { ascending: true }).range(0, 999);
+    if (error) throw new Error(error.message);
+    return (data || []) as { slug: string; name: string }[];
+}
+
+/** Validasi cakupan harga reseller dari form admin. Slug harus produk aktif yang ada. */
+export async function cleanScope(scope: unknown, slugs: unknown): Promise<{ scope: 'all' | 'selected'; slugs: string[] }> {
+    if (scope !== 'all' && scope !== 'selected') throw new Error('Cakupan harga reseller tidak valid.');
+    if (scope === 'all') return { scope, slugs: [] };
+    if (!Array.isArray(slugs) || slugs.some((x) => typeof x !== 'string')) throw new Error('Daftar produk tidak valid.');
+    const want = Array.from(new Set((slugs as string[]).map((x) => x.toLowerCase())));
+    if (want.length > 500) throw new Error('Terlalu banyak produk dipilih.');
+    const have = new Set((await adminProductList()).map((p) => p.slug.toLowerCase()));
+    const unknown = want.filter((x) => !have.has(x));
+    if (unknown.length) throw new Error(`Produk tidak ditemukan: ${unknown.slice(0, 3).join(', ')}`);
+    return { scope, slugs: want };
 }
 
 export async function adminSetItemResellerPrice(itemId: string, price: number | null) {

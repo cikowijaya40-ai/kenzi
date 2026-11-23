@@ -1,7 +1,7 @@
 import { getAdminFromRequest } from '@/lib/security';
 import { updateSiteSettings } from '@/lib/settings';
 import {
-    adminCreateKeyFor, adminCreateReseller, adminDeleteReseller, adminDemote, adminItemRows, adminListResellers, adminPromote,
+    adminCreateKeyFor, adminCreateReseller, adminDeleteReseller, adminDemote, adminItemRows, adminListResellers, adminProductList, adminPromote, cleanScope,
     adminResetPassword, adminSetBanned, adminSetItemResellerPrice, adminSetResellerDisabled, adminUpdateReseller,
     getResellerConfig, revokeApiKey,
 } from '@/lib/reseller';
@@ -32,8 +32,8 @@ export async function GET(req: Request) {
         }
         bust('rsl:cfg');
         const cfg = await getResellerConfig();
-        const [resellers, items] = await Promise.all([adminListResellers(sp.get('q') || ''), adminItemRows(cfg.discount)]);
-        return json({ success: true, config: cfg, resellers, items: items.included, excluded: items.excluded });
+        const [resellers, items, products] = await Promise.all([adminListResellers(sp.get('q') || ''), adminItemRows(cfg), adminProductList()]);
+        return json({ success: true, config: cfg, resellers, items: items.included, excluded: items.excluded, products });
     } catch (e: any) {
         return fail(e.message, 500);
     }
@@ -55,9 +55,12 @@ export async function POST(req: Request) {
             const discount = Number(b.discount);
             if (!Number.isFinite(price) || price < 0 || price > 100_000_000) return fail('Biaya join tidak valid (0 – 100.000.000).');
             if (!Number.isFinite(discount) || discount < 0 || discount > 90) return fail('Diskon harus 0 – 90 persen.');
+            // scope/slugs opsional: kalau tidak dikirim, cakupan lama tidak diubah
+            const sc = b.scope === undefined ? null : await cleanScope(b.scope, b.slugs);
             await updateSiteSettings({
                 reseller_enabled: Boolean(b.enabled), reseller_price: price, reseller_discount: Math.round(discount * 100) / 100,
                 reseller_api_enabled: Boolean(b.apiEnabled),
+                ...(sc ? { reseller_scope: sc.scope, reseller_slugs: sc.slugs } : {}),
             } as any);
             bust('rsl:');
             return json({ success: true });

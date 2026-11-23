@@ -19,6 +19,10 @@ export default function AdminReseller() {
     const [cfg, setCfg] = useState({ enabled: true, apiEnabled: true, price: '50000', discount: '20' });
     const [resellers, setResellers] = useState<any[]>([]);
     const [items, setItems] = useState<any[]>([]);
+    const [products, setProducts] = useState<{ slug: string; name: string }[]>([]);
+    const [scope, setScope] = useState<'all' | 'selected'>('all');
+    const [slugs, setSlugs] = useState<string[]>([]);
+    const [qProd, setQProd] = useState('');
     const [excluded, setExcluded] = useState<any[]>([]);
     const [edit, setEdit] = useState<Record<string, string>>({});
     const [q, setQ] = useState('');
@@ -43,6 +47,7 @@ export default function AdminReseller() {
         setAuth(true);
         setCfg({ enabled: d.config.enabled, apiEnabled: d.config.apiEnabled, price: String(d.config.price), discount: String(d.config.discount) });
         setResellers(d.resellers || []); setItems(d.items || []); setExcluded(d.excluded || []); setEdit({});
+        setProducts(d.products || []); setScope(d.config.scope === 'selected' ? 'selected' : 'all'); setSlugs(d.config.slugs || []);
     }, []);
     useEffect(() => { load(); }, [load]);
     useEffect(() => { const t = setTimeout(() => { if (auth) load(q); }, 350); return () => clearTimeout(t); }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -82,7 +87,7 @@ export default function AdminReseller() {
     const copy = async (t: string) => { try { await navigator.clipboard.writeText(t); setMsg('✔ Tersalin'); } catch { setMsg('✘ Gagal menyalin, salin manual.'); } };
 
     async function saveCfg() {
-        const d = await post({ action: 'settings', enabled: cfg.enabled, apiEnabled: cfg.apiEnabled, price: Number(cfg.price), discount: Number(cfg.discount) });
+        const d = await post({ action: 'settings', enabled: cfg.enabled, apiEnabled: cfg.apiEnabled, price: Number(cfg.price), discount: Number(cfg.discount), scope, slugs });
         setMsg(d.success ? '✔ Pengaturan tersimpan' : '✘ ' + d.message); if (d.success) load(q);
     }
     async function saveItem(it: any) {
@@ -207,8 +212,31 @@ export default function AdminReseller() {
                 <label className="f-lab" style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} /> Pendaftaran reseller mandiri dibuka</label>
                 <label className="f-lab" style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={cfg.apiEnabled} onChange={(e) => setCfg({ ...cfg, apiEnabled: e.target.checked })} /> Reseller API aktif (matikan = semua request API ditolak 403)</label>
                 {label('Biaya join (Rp)')}<input style={inp} inputMode="numeric" value={cfg.price} onChange={(e) => setCfg({ ...cfg, price: e.target.value.replace(/\D/g, '') })} />
-                {label('Diskon global reseller (%)')}<input style={inp} inputMode="decimal" value={cfg.discount} onChange={(e) => setCfg({ ...cfg, discount: e.target.value.replace(/[^\d.]/g, '') })} />
-                <p style={{ fontSize: 12, opacity: 0.7, margin: '8px 0' }}>Harga reseller = harga khusus per opsi (di bawah) bila diisi, kalau tidak harga biasa × (1 − diskon), dibulatkan. Kalau harga jual biasa lebih murah, itu yang dipakai.</p>
+                {label('Diskon reseller (%)')}<input style={inp} inputMode="decimal" value={cfg.discount} onChange={(e) => setCfg({ ...cfg, discount: e.target.value.replace(/[^\d.]/g, '') })} />
+                {label('Harga reseller berlaku untuk')}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" className={scope === 'all' ? 'btn-main' : 'btn-ghost'} onClick={() => setScope('all')}>Semua produk</button>
+                    <button type="button" className={scope === 'selected' ? 'btn-main' : 'btn-ghost'} onClick={() => setScope('selected')}>Produk tertentu saja</button>
+                </div>
+                {scope === 'selected' && (
+                    <div style={{ marginTop: 10 }}>
+                        <p style={{ fontSize: 12, opacity: 0.75, margin: '0 0 8px' }}>Hanya produk yang dicentang yang mendapat harga reseller (diskon dan harga khusus). Produk lain tetap harga normal untuk semua orang, termasuk reseller. Dipilih: <b>{slugs.length}</b> dari {products.length}.</p>
+                        <input style={inp} placeholder="Cari produk..." value={qProd} onChange={(e) => setQProd(e.target.value)} />
+                        <div style={{ display: 'flex', gap: 8, margin: '8px 0' }}>
+                            <button type="button" className="btn-ghost" onClick={() => setSlugs(Array.from(new Set([...slugs, ...products.filter((p) => !qProd || p.name.toLowerCase().includes(qProd.toLowerCase())).map((p) => p.slug.toLowerCase())])))}>Pilih yang tampil</button>
+                            <button type="button" className="btn-ghost" onClick={() => setSlugs([])}>Kosongkan</button>
+                        </div>
+                        <div style={{ maxHeight: 260, overflowY: 'auto', border: '1px solid rgba(128,128,128,.25)', borderRadius: 10, padding: '4px 10px' }}>
+                            {products.filter((p) => !qProd || p.name.toLowerCase().includes(qProd.toLowerCase())).map((p) => (
+                                <label key={p.slug} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 0', fontSize: 13.5 }}>
+                                    <input type="checkbox" checked={slugs.includes(p.slug.toLowerCase())} onChange={(e) => setSlugs(e.target.checked ? [...slugs, p.slug.toLowerCase()] : slugs.filter((x) => x !== p.slug.toLowerCase()))} /> {p.name}
+                                </label>
+                            ))}
+                        </div>
+                        {slugs.length === 0 && <p style={{ fontSize: 12, color: '#f59e0b', margin: '8px 0 0' }}>Belum ada produk dipilih: tidak ada produk yang mendapat harga reseller.</p>}
+                    </div>
+                )}
+                <p style={{ fontSize: 12, opacity: 0.7, margin: '8px 0' }}>Untuk produk yang masuk program: harga reseller = harga khusus per opsi (di bawah) bila diisi, kalau tidak harga biasa × (1 − diskon), dibulatkan. Kalau harga jual biasa lebih murah, itu yang dipakai.</p>
                 <button className="btn-main" onClick={saveCfg}>Simpan Pengaturan</button>
             </div>
 
@@ -217,7 +245,7 @@ export default function AdminReseller() {
             <div className="hist" style={{ marginTop: 10 }}>
                 {shown.map((i) => (
                     <div key={i.itemId} className="h-item" style={{ flexWrap: 'wrap', gap: 8 }}>
-                        <div className="m"><b>{i.product} · {i.label}</b><small>Kode API <code>{i.apiCode}</code> · harga biasa {rp(i.publicPrice)} · efektif <b>{rp(i.effective)}</b></small></div>
+                        <div className="m"><b>{i.product} · {i.label}</b><small>Kode API <code>{i.apiCode}</code> · harga biasa {rp(i.publicPrice)} · efektif <b>{rp(i.effective)}</b>{i.eligible === false && <span style={{ color: '#f59e0b' }}> · produk ini tidak masuk program harga reseller (harga normal)</span>}</small></div>
                         <div className="r" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                             <input style={{ width: 110, height: 34, borderRadius: 8, padding: '0 8px' }} inputMode="numeric" placeholder="otomatis"
                                 value={edit[i.itemId] ?? (i.resellerOverride ? String(i.resellerOverride) : '')} onChange={(e) => setEdit({ ...edit, [i.itemId]: e.target.value.replace(/\D/g, '') })} />
