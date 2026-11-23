@@ -56,3 +56,15 @@ PATCH: OPEN RESELLER + RESELLER API v1  (konsep Thanhub / Drip)
 5) Kode API (SKU) dibuat otomatis dari NAMA opsi: <slug produk>.<angka><d|h|m>, contoh drip.30d.
    Nama yang terbaca: "30 Hari", "3 Jam", "15 Menit", "2 Minggu", "1 Bulan", "Lifetime". Opsi yang namanya tidak terbaca
    atau kodenya kembar tidak masuk API; daftarnya tampil di bagian "Tidak Masuk API" di /admin/reseller.
+
+=====================================================================================
+PATCH 3: PORTAL RESELLER + HARGA RESELLER DI WEB (mirip Thanhub)
+=====================================================================================
+- Migrasi baru supabase/migrations/2026-11-reseller-web-price.sql ikut diterapkan OTOMATIS saat build
+  (daftar di scripts/migrate.js, setelah migrasi reseller pertama). Tanpa DATABASE_URL: jalankan manual berurutan.
+- /reseller sekarang satu portal: Login Reseller (form tertanam) -> dashboard (profil, saldo, statistik, Top Sellers,
+  tab Pembelian / Mutasi / API + tabel "Produk Kamu" berisi kode API dan harga reseller).
+- Reseller aktif otomatis melihat HARGA RESELLER di kartu produk, halaman produk, dan form beli.
+  Pembayaran (saldo maupun QRIS) dihitung ulang di server dari database; angka dari browser tidak dipercaya.
+  Harga di bawah harga normal hanya bisa untuk reseller aktif, dijaga juga di level database (purchase_item_priced).
+- Reseller yang dinonaktifkan / dijadikan user biasa otomatis kembali ke harga normal.

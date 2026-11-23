@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 export const rp = (n: number | string) => 'Rp ' + (Number(n) || 0).toLocaleString('id-ID');
 
@@ -26,7 +26,7 @@ const ME_EVENT = 'epep:me';
 let meFlight: Promise<any> | null = null;
 
 export function refreshMe() {
-    try { sessionStorage.removeItem(ME_KEY); } catch { }
+    try { sessionStorage.removeItem(ME_KEY); sessionStorage.removeItem('epep_rp'); } catch { }
     window.dispatchEvent(new Event(ME_EVENT));
 }
 export function setMeBalance(balance: number) {
@@ -131,7 +131,44 @@ export function useCatalog() {
         })();
         return () => { alive = false; };
     }, []);
-    return { data, loading };
+    // Reseller aktif melihat harga reseller (hanya tampilan; harga yang dibayar dihitung ulang di server saat beli)
+    const { user } = useMe();
+    const rprices = useResellerPrices(!!user?.is_reseller);
+    const merged = useMemo(() => {
+        if (!data || !rprices) return data;
+        return {
+            ...data,
+            products: data.products.map((p) => ({
+                ...p,
+                items: (p.items || []).map((i) => {
+                    const rp = rprices[`${p.slug}|${i.sku}`];
+                    return typeof rp === 'number' && rp > 0 && rp < i.price ? { ...i, original_price: Math.max(i.original_price || 0, i.price), price: rp } : i;
+                }),
+            })),
+        };
+    }, [data, rprices]);
+    return { data: merged, loading };
+}
+
+/** Peta harga reseller ("slug|sku" -> harga) untuk akun reseller aktif. Cache 60 dtk per tab; dibuang saat login/logout. */
+export function useResellerPrices(enabled: boolean) {
+    const [prices, setPrices] = useState<Record<string, number> | null>(null);
+    useEffect(() => {
+        if (!enabled) { setPrices(null); return; }
+        let alive = true;
+        try {
+            const c = JSON.parse(sessionStorage.getItem('epep_rp') || 'null');
+            if (c && c.prices && Date.now() - c.t < 60_000) { setPrices(c.prices); return; }
+        } catch { }
+        api('/api/reseller/prices').then((r: any) => {
+            if (!alive) return;
+            const p = r && r.success && r.prices ? (r.prices as Record<string, number>) : null;
+            setPrices(p);
+            try { if (p) sessionStorage.setItem('epep_rp', JSON.stringify({ t: Date.now(), prices: p })); } catch { }
+        });
+        return () => { alive = false; };
+    }, [enabled]);
+    return prices;
 }
 
 /** 87 → "87", 1250 → "1,2rb+", 12000 → "12rb+" */

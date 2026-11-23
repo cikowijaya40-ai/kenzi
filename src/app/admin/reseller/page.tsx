@@ -51,7 +51,7 @@ export default function AdminReseller() {
     const loginInfo = (u: { username: string; email?: string }, password?: string | null, key?: string | null) => [
         `Akun Reseller`, `Login: ${origin}/login`, `Username: ${u.username}`, ...(u.email ? [`Email: ${u.email}`] : []),
         ...(password ? [`Password: ${password}`] : []), ...(key ? [`API key: ${key}`] : []),
-        `Dashboard API key: ${origin}/reseller/api`, `Dokumentasi API: ${origin}/docs/api`,
+        `Portal reseller (login di sini): ${origin}/reseller`, `Dokumentasi API: ${origin}/docs/api`,
     ];
 
     async function act(body: any, okMsg: string, after?: (d: any) => void) {

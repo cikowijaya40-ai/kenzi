@@ -1,3 +1,4 @@
+import { resellerWebPrice } from './resellerPrice';
 import { randomUUID } from 'crypto';
 import { getOrder, requireDb, updateOrderByInvoice } from './supabase';
 import { orderLicenseKey, thLiveCheck } from './thanhub';
@@ -121,15 +122,19 @@ export async function buyWithBalance(user: AppUser, input: { productSlug: string
         return { success: false as const, code: 'MAINTENANCE', message: maintenanceMessage(prodRow.name, prodRow.maintenance_note) };
     }
 
-    // 0) Stok & harga LIVE di Thanhub (gagal membaca = lolos)
+    // 0) Harga reseller (hanya akun reseller aktif; dihitung di server dari database, bukan dari klien)
+    const resellerPrice = await resellerWebPrice(user.id, input.productSlug, input.itemSku);
+
+    // 0b) Stok & harga LIVE di Thanhub (gagal membaca = lolos). Pakai harga yang BENAR-BENAR akan dibayar,
+    //     supaya reseller tidak bisa membeli di bawah modal.
     const { data: pre } = await db.from('product_items').select('sku, price').eq('product_slug', input.productSlug).eq('sku', input.itemSku).maybeSingle();
     if (pre) {
-        const live = await thLiveCheck(pre.sku, Math.round(Number(pre.price)));
+        const live = await thLiveCheck(pre.sku, resellerPrice ?? Math.round(Number(pre.price)));
         if (!live.ok) return { success: false as const, code: 'ITEM_UNAVAILABLE', message: live.message };
     }
 
     // 1) Potong saldo + kurangi stok + buat pesanan — SATU transaksi atomik di database
-    const { data, error } = await db.rpc('purchase_item', {
+    const args = {
         p_user: user.id,
         p_slug: input.productSlug,
         p_sku: input.itemSku,
@@ -139,12 +144,16 @@ export async function buyWithBalance(user: AppUser, input: { productSlug: string
         p_zone: input.zoneId || '',
         p_whatsapp: input.whatsapp || '',
         p_email: user.email,
-    });
+    };
+    const { data, error } = resellerPrice != null
+        ? await db.rpc('purchase_item_priced', { ...args, p_price: resellerPrice })
+        : await db.rpc('purchase_item', args);
     if (error) {
         const m = error.message || '';
         if (m.includes('INSUFFICIENT_BALANCE')) return { success: false as const, code: 'INSUFFICIENT_BALANCE', message: 'Saldo tidak cukup. Silakan top up dulu.' };
         if (m.includes('ITEM_UNAVAILABLE')) return { success: false as const, code: 'ITEM_UNAVAILABLE', message: 'Produk/varian tidak tersedia atau stok habis.' };
         if (m.includes('USER_INVALID')) return { success: false as const, code: 'USER_INVALID', message: 'Akun tidak valid.' };
+        if (m.includes('FORBIDDEN_PRICE')) return { success: false as const, code: 'ITEM_UNAVAILABLE', message: 'Harga produk sedang diperbarui. Muat ulang halaman lalu coba lagi.' };
         console.error('[purchase_item]', m);
         return { success: false as const, code: 'ERROR', message: 'Gagal memproses pesanan. Coba lagi.' };
     }

@@ -117,9 +117,11 @@ export default function SiteShell({ children, plain = false }: { children: React
 
                 <div className="kx-sec">Reseller</div>
                 <div className="kx-links">
-                    {user?.is_reseller
-                        ? <Link href="/reseller/api" onClick={go} className={`kx-link ${path.startsWith('/reseller') ? 'active' : ''}`}><i className="fa-solid fa-key lead" /><span>API Key Reseller</span><i className="fa-solid fa-chevron-right chev" /></Link>
-                        : <Link href="/reseller" onClick={go} className={`kx-link ${path === '/reseller' ? 'active' : ''}`}><i className="fa-solid fa-handshake lead" /><span>Jadi Reseller</span><i className="fa-solid fa-chevron-right chev" /></Link>}
+                    <Link href="/reseller" onClick={go} className={`kx-link ${path.startsWith('/reseller') ? 'active' : ''}`}>
+                        <i className={`fa-solid ${user?.is_reseller ? 'fa-crown' : user ? 'fa-handshake' : 'fa-right-to-bracket'} lead`} />
+                        <span>{user?.is_reseller ? 'Portal Reseller' : user ? 'Jadi Reseller' : 'Login Reseller'}</span>
+                        <i className="fa-solid fa-chevron-right chev" />
+                    </Link>
                     <Link href="/docs/api" onClick={go} className={`kx-link ${path.startsWith('/docs/api') ? 'active' : ''}`}><i className="fa-solid fa-book lead" /><span>Dokumentasi API</span><i className="fa-solid fa-chevron-right chev" /></Link>
                 </div>
 
@@ -154,7 +156,7 @@ export default function SiteShell({ children, plain = false }: { children: React
                                 <div className="links">
                                     {NAV.map((n) => <Link key={n.href} href={n.href}>{n.label}</Link>)}
                                     <Link href="/register">Daftar Akun</Link>
-                                    <Link href={user?.is_reseller ? '/reseller/api' : '/reseller'}>{user?.is_reseller ? 'API Key Reseller' : 'Open Reseller'}</Link>
+                                    <Link href="/reseller">{user?.is_reseller ? 'Portal Reseller' : 'Login Reseller'}</Link>
                                     <Link href="/docs/api">Dokumentasi API</Link>
                                 </div>
                             </div>

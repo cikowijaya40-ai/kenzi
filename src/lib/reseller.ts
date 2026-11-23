@@ -3,7 +3,7 @@ import { requireDb } from './supabase';
 import { bust, memo } from './cache';
 import { hashPassword, rateLimit, sha256, validatePasswordStrength } from './security';
 import { EMAIL_RE, USERNAME_RE, sanitizeText } from './users';
-import { adminAdjust } from './wallet';
+import { adminAdjust, listLedger } from './wallet';
 import { judgeLive, thBuy, thLiveMap, thVariantId } from './thanhub';
 import type { AppUser } from './types';
 
@@ -21,37 +21,11 @@ export const CURRENCY = 'IDR';
 const rid = () => Math.random().toString(36).slice(2, 7).toUpperCase();
 const stampNow = () => Date.now().toString().slice(-8);
 
-/* ═════════ PENGATURAN ═════════ */
-export interface ResellerConfig { enabled: boolean; price: number; discount: number; apiEnabled: boolean }
+/* ═════════ PENGATURAN & HARGA: lihat resellerPrice.ts (dipakai juga oleh wallet.ts / checkout.ts) ═════════ */
+export { getResellerConfig, resellerPriceOf, type ResellerConfig } from './resellerPrice';
+import { getResellerConfig, resellerPriceOf } from './resellerPrice';
 
-/** Dibaca langsung dari DB dengan cache 5 detik (bukan cache 60 detik settings) supaya tombol "matikan API" cepat berlaku. */
-export async function getResellerConfig(): Promise<ResellerConfig> {
-    return memo('rsl:cfg', 5_000, async () => {
-        const { data } = await requireDb().from('site_settings').select('value').eq('key', 'main_config').maybeSingle();
-        const v: any = data?.value || {};
-        const num = (x: unknown, d: number) => (x === undefined || x === null || x === '' || Number.isNaN(Number(x)) ? d : Number(x));
-        return {
-            enabled: v.reseller_enabled !== false,
-            price: Math.min(100_000_000, Math.max(0, Math.round(num(v.reseller_price, 50000)))),
-            discount: Math.min(90, Math.max(0, num(v.reseller_discount, 20))),
-            apiEnabled: v.reseller_api_enabled !== false,
-        };
-    });
-}
-
-/* ═════════ HARGA & SKU ═════════ */
-
-/**
- * Harga reseller per opsi: reseller_price bila diisi admin, kalau tidak harga * (1 - diskon/100), dibulatkan.
- * Kalau harga jual biasa (termasuk promo) lebih murah, harga itu yang dipakai: selalu yang paling murah.
- */
-export function resellerPriceOf(item: { price: number; reseller_price?: number | null }, discountPct: number): number {
-    const pub = Math.round(Number(item.price) || 0);
-    const rp = Number(item.reseller_price);
-    const viaDiscount = Math.round(pub * (1 - Math.min(90, Math.max(0, discountPct)) / 100));
-    const base = Number.isFinite(rp) && rp > 0 ? Math.round(rp) : viaDiscount;
-    return Math.max(0, Math.min(base, pub));
-}
+/* ═════════ SKU ═════════ */
 
 export type DurUnit = 'd' | 'h' | 'm';
 export const SKU_RE = /^([a-z0-9][a-z0-9_-]{0,99})\.(\d{1,5})([dhm])$/;
@@ -235,6 +209,98 @@ export async function getResellerState(user: { id: string; balance: number }) {
         isReseller: Boolean(data?.is_reseller), disabled: Boolean(data?.reseller_disabled), since: data?.reseller_since || null,
         keyPrefix: data?.api_key_prefix || null, keyCreatedAt: data?.api_key_created_at || null,
         balance: Number(user.balance) || 0,      // sumber saldo = akun yang login, bukan hasil query di atas
+    };
+}
+
+/* ═════════ PORTAL RESELLER (mirip portal Thanhub) ═════════ */
+const wibStartOfDay = (now = Date.now()) => {
+    const w = new Date(now + 7 * 3600_000);
+    return Date.UTC(w.getUTCFullYear(), w.getUTCMonth(), w.getUTCDate()) - 7 * 3600_000;   // 00:00 WIB
+};
+
+/** Katalog untuk tabel "Produk Kamu": semua opsi aktif, harga reseller + harga biasa + kode API (kalau namanya terbaca). */
+async function portalCatalog(discount: number) {
+    const db = requireDb();
+    const [p, i, live] = await Promise.all([
+        db.from('products').select('slug, name, category_slug, maintenance, sort_order').eq('is_active', true).order('sort_order', { ascending: true }).range(0, 999),
+        db.from('product_items').select('id, product_slug, sku, name, price, reseller_price, in_stock, stock, sort_order').or('is_active.is.null,is_active.eq.true').order('sort_order', { ascending: true }).range(0, 4999),
+        thLiveMap().catch(() => null),
+    ]);
+    if (p.error) throw new Error(p.error.message);
+    if (i.error) throw new Error(i.error.message);
+    const byProd = new Map<string, RawItem[]>();
+    for (const it of i.data || []) { const x = normItem(it); if (!byProd.has(x.product_slug)) byProd.set(x.product_slug, []); byProd.get(x.product_slug)!.push(x); }
+    return (p.data || []).map((pr: any) => {
+        const items = byProd.get(pr.slug) || [];
+        const codes = new Map(buildRows(normProd(pr), items).rows.map((r) => [r.itemId, r.apiCode]));
+        const maint = pr.maintenance === true;
+        return {
+            slug: pr.slug, name: pr.name, maintenance: maint,
+            items: items.map((it) => {
+                const price = resellerPriceOf({ price: it.price, reseller_price: it.reseller_price }, discount);
+                const liveOk = live ? judgeLive(live.get(thVariantId(it.sku)), price).ok : true;
+                return {
+                    sku: it.sku, label: it.name, apiCode: codes.get(it.id) || null, price, normal: Math.round(it.price),
+                    inStock: !maint && it.in_stock && it.stock > 0 && price > 0 && liveOk,
+                };
+            }).sort((a, b) => a.price - b.price),
+        };
+    }).filter((x: any) => x.items.length);
+}
+
+/** Peringkat reseller berdasarkan total belanja (order selesai). Cache 60 detik. */
+async function topSellersRaw(): Promise<{ id: string; name: string; qty: number; spent: number }[]> {
+    return memo('rsl:top', 60_000, async () => {
+        const db = requireDb();
+        const { data: users } = await db.from('users').select('id, username').eq('is_reseller', true).eq('reseller_disabled', false).limit(2000);
+        const ids = (users || []).map((u: any) => u.id);
+        if (!ids.length) return [];
+        const { data: ords } = await db.from('orders').select('user_id, quantity, total_amount').eq('delivery_status', 'DELIVERED').in('user_id', ids).limit(50000);
+        const agg = new Map<string, { qty: number; spent: number }>();
+        for (const o of ords || []) { const a = agg.get(o.user_id) || { qty: 0, spent: 0 }; a.qty += Math.max(1, Number(o.quantity) || 1); a.spent += Number(o.total_amount) || 0; agg.set(o.user_id, a); }
+        const name = new Map((users || []).map((u: any) => [u.id, u.username]));
+        return Array.from(agg.entries()).map(([id, a]) => ({ id, name: String(name.get(id) || 'Reseller'), ...a })).sort((x, y) => y.spent - x.spent).slice(0, 5);
+    });
+}
+
+/**
+ * Semua data untuk halaman portal /reseller dalam satu panggilan. Saldo SELALU dari akun yang login.
+ * Hanya reseller aktif yang mendapat data (katalog, riwayat, mutasi, top seller); selain itu cukup statusnya.
+ */
+export async function getPortal(user: { id: string; username: string; email: string; balance: number }) {
+    const state = await getResellerState(user);
+    const base = { ...state, user: { username: user.username, email: user.email } };
+    if (!state.ready || !state.isReseller || state.disabled) return { ...base, active: false as const };
+
+    const db = requireDb();
+    const cfg = await getResellerConfig();
+    const [ords, ledger, catalog, top] = await Promise.all([
+        db.from('orders').select('invoice_no, product_name, item_name, quantity, total_amount, status, delivery_status, source, created_at')
+            .eq('user_id', user.id).neq('status', 'EXPIRED').order('created_at', { ascending: false }).limit(5000),
+        listLedger(user.id, 50),
+        portalCatalog(cfg.discount),
+        topSellersRaw(),
+    ]);
+    const all: any[] = ords.data || [];
+    const startToday = wibStartOfDay();
+    const since30 = Date.now() - 30 * 24 * 3600_000;
+    const stats = { keys: 0, spent: 0, todayKeys: 0, todaySpent: 0, d30Keys: 0, d30Spent: 0 };
+    for (const o of all) {
+        if (o.delivery_status !== 'DELIVERED') continue;
+        const q = Math.max(1, Number(o.quantity) || 1), amt = Number(o.total_amount) || 0, t = Date.parse(o.created_at) || 0;
+        stats.keys += q; stats.spent += amt;
+        if (t >= startToday) { stats.todayKeys += q; stats.todaySpent += amt; }
+        if (t >= since30) { stats.d30Keys += q; stats.d30Spent += amt; }
+    }
+    return {
+        ...base, active: true as const, discount: cfg.discount, stats,
+        orders: all.slice(0, 50).map((o) => ({
+            invoice: o.invoice_no, product: o.product_name, item: o.item_name, quantity: Math.max(1, Number(o.quantity) || 1),
+            total: Number(o.total_amount) || 0, status: o.delivery_status === 'DELIVERED' ? 'OK' : o.status === 'FAILED' || o.delivery_status === 'FAILED' ? 'FAILED' : 'PENDING',
+            via: o.source === 'api' ? 'API' : 'Web', createdAt: o.created_at,
+        })),
+        ledger, catalog,
+        topSellers: top.map((t) => ({ name: t.name, qty: t.qty, spent: t.spent, me: t.id === user.id })),
     };
 }
 

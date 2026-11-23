@@ -16,7 +16,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const MIGRATIONS = ['2026-11-open-reseller.sql'];
+// Urutan penting: yang kedua memakai kolom dari yang pertama.
+const MIGRATIONS = ['2026-11-open-reseller.sql', '2026-11-reseller-web-price.sql'];
 
 const tag = '[migrate]';
 const log = (m) => console.log(`${tag} ${m}`);

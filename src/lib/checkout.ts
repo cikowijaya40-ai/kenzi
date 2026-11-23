@@ -4,6 +4,7 @@ import { sendPlainMail } from './email';
 import { getSiteSettings } from './settings';
 import { readInitCred } from './guest';
 import { thLiveCheck } from './thanhub';
+import { resellerWebPrice } from './resellerPrice';
 import type { Order } from './types';
 
 const rid = () => Math.random().toString(36).slice(2, 7).toUpperCase();
@@ -26,7 +27,9 @@ export async function createQrisOrder(user: { id: string; email: string }, input
         return { success: false as const, code: 'MAINTENANCE', message: maintenanceMessage(pr.name, pr.maintenance_note) };
     }
     const available = pr && it && pr.is_active !== false && it.is_active !== false && it.in_stock !== false && Number(it.stock ?? 999) > 0;
-    const price = it ? Math.round(Number(it.price)) : 0;
+    const publicPrice = it ? Math.round(Number(it.price)) : 0;
+    // Akun reseller aktif membayar harga reseller (dihitung di server); selain itu harga biasa
+    const price = (it && (await resellerWebPrice(user.id, input.productSlug, input.itemSku))) || publicPrice;
     if (!available || price <= 0) return { success: false as const, code: 'ITEM_UNAVAILABLE', message: 'Produk/varian tidak tersedia atau stok habis.' };
 
     // Stok & harga LIVE di Thanhub dicek tepat sebelum QR dibuat → pembeli tidak sempat membayar varian yang sudah habis.
